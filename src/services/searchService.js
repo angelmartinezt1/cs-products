@@ -1,8 +1,59 @@
+// src/services/searchService.js - Versión completa con facetas integradas
 import { executeQuery } from '../config/database.js'
 
 export class SearchService {
   
-  // Búsqueda principal de productos
+  /**
+   * Búsqueda principal de productos con facetas integradas
+   */
+  static async searchProductsWithFacets(params) {
+    const {
+      query = '',
+      page = 1,
+      limit = 20,
+      sortBy = 'relevance',
+      sortOrder = 'desc',
+      filters = {},
+      includeFacets = true,
+      facetMode = 'dynamic' // 'dynamic' o 'cached'
+    } = params
+
+    const startTime = Date.now()
+
+    try {
+      // Ejecutar búsqueda de productos y facetas en paralelo
+      const [searchResults, facets] = await Promise.all([
+        this.searchProducts({
+          query,
+          page,
+          limit,
+          sortBy,
+          sortOrder,
+          filters,
+          facets: false // No incluir facetas en la búsqueda principal
+        }),
+        includeFacets ? this.getFacetsForSearch(query, filters, facetMode) : null
+      ])
+
+      return {
+        ...searchResults,
+        facets: facets || null,
+        facetMode: includeFacets ? facetMode : null,
+        meta: {
+          ...searchResults.meta,
+          facetsIncluded: includeFacets,
+          executionTime: Date.now() - startTime
+        }
+      }
+    } catch (error) {
+      console.error('Search with facets error:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Búsqueda principal de productos (método actualizado)
+   */
   static async searchProducts(params) {
     const {
       query = '',
@@ -24,7 +75,7 @@ export class SearchService {
       const [products, totalResults, facetResults] = await Promise.all([
         executeQuery(sql, queryParams),
         this.getSearchCount(countSql, queryParams.slice(0, -2)), // Sin LIMIT y OFFSET
-        facets ? this.getFacets(query, filters) : Promise.resolve([])
+        facets ? this.getFacets(query, filters) : Promise.resolve(null)
       ])
 
       // Enriquecer productos con datos adicionales
@@ -40,7 +91,11 @@ export class SearchService {
         },
         facets: facetResults,
         query: query,
-        executionTime: Date.now()
+        filters: this.normalizeFilters(filters),
+        meta: {
+          executionTime: Date.now(),
+          timestamp: new Date().toISOString()
+        }
       }
     } catch (error) {
       console.error('Search error:', error)
@@ -48,6 +103,9 @@ export class SearchService {
     }
   }
 
+  /**
+   * Construye la consulta SQL de búsqueda
+   */
   static buildSearchQuery(query, filters, sortBy, sortOrder, limit, offset) {
     let sql = `
       SELECT 
@@ -81,7 +139,9 @@ export class SearchService {
         p.thumbnail,
         p.fulfillment_type,
         p.has_free_shipping,
-        p.relevance_score
+        p.relevance_score,
+        p.created_at,
+        p.updated_at
       FROM products p
       WHERE p.status = 1 
         AND p.visible = 1 
@@ -92,15 +152,12 @@ export class SearchService {
     const queryParams = []
     const whereConditions = []
   
-    // Búsqueda por texto
+    // Búsqueda por texto con diferentes estrategias
     if (query && query.trim()) {
-      const likeQuery = `%${query.trim()}%`
-      whereConditions.push(`(
-        p.name LIKE ? OR 
-        p.brand LIKE ? OR 
-        p.search_text LIKE ?
-      )`)
-      queryParams.push(likeQuery, likeQuery, likeQuery)
+      const searchStrategy = this.determineSearchStrategy(query)
+      const searchCondition = this.buildTextSearchCondition(query, searchStrategy)
+      whereConditions.push(searchCondition.condition)
+      queryParams.push(...searchCondition.params)
     }
   
     // Aplicar filtros
@@ -122,28 +179,119 @@ export class SearchService {
     sql += ` LIMIT ? OFFSET ?`
     queryParams.push(parseInt(limit), parseInt(offset))
   
-    console.log('🔍 SQL:', sql) // Debug
-    console.log('📊 Params:', queryParams) // Debug
+    console.log('🔍 SQL:', sql.trim())
+    console.log('📊 Params:', queryParams)
   
     return { sql, countSql, queryParams }
   }
 
-  // Determinar si es una búsqueda simple
-  static isSimpleQuery(query) {
-    // Si es una sola palabra o palabras simples, usar LIKE
-    return query.split(' ').length <= 2 && !/[+\-*"~<>()]/.test(query)
+  /**
+   * Determina la estrategia de búsqueda basada en el query
+   */
+  static determineSearchStrategy(query) {
+    const trimmedQuery = query.trim()
+    
+    // Búsqueda exacta si está entre comillas
+    if (trimmedQuery.startsWith('"') && trimmedQuery.endsWith('"')) {
+      return 'exact'
+    }
+    
+    // Búsqueda por SKU si parece un código de producto
+    if (/^[A-Z0-9\-_]{6,}$/i.test(trimmedQuery)) {
+      return 'sku'
+    }
+    
+    // Búsqueda por marca si es una sola palabra conocida
+    if (trimmedQuery.split(' ').length === 1 && trimmedQuery.length > 2) {
+      return 'brand_first'
+    }
+    
+    // Búsqueda compleja si tiene múltiples palabras
+    if (trimmedQuery.split(' ').length > 3) {
+      return 'complex'
+    }
+    
+    return 'standard'
   }
 
-  // Construir condiciones de filtros
+  /**
+   * Construye la condición de búsqueda de texto
+   */
+  static buildTextSearchCondition(query, strategy) {
+    const trimmedQuery = query.trim()
+    
+    switch (strategy) {
+      case 'exact':
+        const exactQuery = trimmedQuery.slice(1, -1) // Remover comillas
+        return {
+          condition: `(p.name LIKE ? OR p.description LIKE ?)`,
+          params: [`%${exactQuery}%`, `%${exactQuery}%`]
+        }
+        
+      case 'sku':
+        return {
+          condition: `(p.sku = ? OR p.sku LIKE ?)`,
+          params: [trimmedQuery, `%${trimmedQuery}%`]
+        }
+        
+      case 'brand_first':
+        const likeQuery = `%${trimmedQuery}%`
+        return {
+          condition: `(
+            p.brand LIKE ? OR 
+            p.name LIKE ? OR 
+            p.search_text LIKE ?
+          )`,
+          params: [likeQuery, likeQuery, likeQuery]
+        }
+        
+      case 'complex':
+        // Búsqueda por palabras individuales
+        const words = trimmedQuery.split(' ').filter(word => word.length > 2)
+        const wordConditions = words.map(() => 
+          `(p.name LIKE ? OR p.brand LIKE ? OR p.search_text LIKE ?)`
+        ).join(' AND ')
+        const wordParams = words.flatMap(word => {
+          const wordQuery = `%${word}%`
+          return [wordQuery, wordQuery, wordQuery]
+        })
+        
+        return {
+          condition: `(${wordConditions})`,
+          params: wordParams
+        }
+        
+      default: // standard
+        const standardQuery = `%${trimmedQuery}%`
+        return {
+          condition: `(
+            p.name LIKE ? OR 
+            p.brand LIKE ? OR 
+            p.search_text LIKE ?
+          )`,
+          params: [standardQuery, standardQuery, standardQuery]
+        }
+    }
+  }
+
+  /**
+   * Construye condiciones de filtros
+   */
   static buildFilterConditions(filters, queryParams) {
     const conditions = []
 
     // Filtro por categoría
     if (filters.category_id) {
-      conditions.push('p.category_id = ?')
-      queryParams.push(filters.category_id)
+      if (Array.isArray(filters.category_id)) {
+        conditions.push(`p.category_id IN (${filters.category_id.map(() => '?').join(',')})`)
+        queryParams.push(...filters.category_id.map(id => parseInt(id)))
+      } else {
+        conditions.push('p.category_id = ?')
+        queryParams.push(parseInt(filters.category_id))
+      }
     }
 
+    // Filtros de categoría por nivel
     if (filters.category_lvl0) {
       conditions.push('p.category_lvl0 = ?')
       queryParams.push(filters.category_lvl0)
@@ -152,6 +300,11 @@ export class SearchService {
     if (filters.category_lvl1) {
       conditions.push('p.category_lvl1 = ?')
       queryParams.push(filters.category_lvl1)
+    }
+
+    if (filters.category_lvl2) {
+      conditions.push('p.category_lvl2 = ?')
+      queryParams.push(filters.category_lvl2)
     }
 
     // Filtro por marca
@@ -169,530 +322,516 @@ export class SearchService {
     if (filters.store_id) {
       if (Array.isArray(filters.store_id)) {
         conditions.push(`p.store_id IN (${filters.store_id.map(() => '?').join(',')})`)
-        queryParams.push(...filters.store_id)
+        queryParams.push(...filters.store_id.map(id => parseInt(id)))
       } else {
         conditions.push('p.store_id = ?')
-        queryParams.push(filters.store_id)
+        queryParams.push(parseInt(filters.store_id))
       }
     }
 
     // Filtro por rango de precio
     if (filters.min_price) {
       conditions.push('p.sales_price >= ?')
-      queryParams.push(filters.min_price)
+      queryParams.push(parseFloat(filters.min_price))
     }
 
     if (filters.max_price) {
       conditions.push('p.sales_price <= ?')
-      queryParams.push(filters.max_price)
-    }
-
-    // Filtro por envío gratis
-    if (filters.free_shipping === 'true' || filters.free_shipping === true) {
-      conditions.push('p.has_free_shipping = 1')
-    }
-
-    // Filtro por fulfillment
-    if (filters.fulfillment_type) {
-      conditions.push('p.fulfillment_type = ?')
-      queryParams.push(filters.fulfillment_type)
+      queryParams.push(parseFloat(filters.max_price))
     }
 
     // Filtro por rating mínimo
     if (filters.min_rating) {
       conditions.push('p.review_rating >= ?')
-      queryParams.push(filters.min_rating)
+      queryParams.push(parseFloat(filters.min_rating))
+    }
+
+    // Filtro por envío gratis
+    if (filters.free_shipping === true || filters.free_shipping === 'true') {
+      conditions.push('p.has_free_shipping = 1')
+    }
+
+    // Filtro por fulfillment
+    if (filters.fulfillment_type) {
+      if (Array.isArray(filters.fulfillment_type)) {
+        conditions.push(`p.fulfillment_type IN (${filters.fulfillment_type.map(() => '?').join(',')})`)
+        queryParams.push(...filters.fulfillment_type)
+      } else {
+        conditions.push('p.fulfillment_type = ?')
+        queryParams.push(filters.fulfillment_type)
+      }
     }
 
     // Filtro por productos digitales
-    if (filters.digital === 'true' || filters.digital === true) {
+    if (filters.digital === true || filters.digital === 'true') {
       conditions.push('p.digital = 1')
     }
 
-    // Filtro por descuentos
-    if (filters.has_discount === 'true' || filters.has_discount === true) {
+    // Filtro por productos con descuento
+    if (filters.has_discount === true || filters.has_discount === 'true') {
       conditions.push('p.percentage_discount > 0')
+    }
+
+    // Filtro por productos de alto valor
+    if (filters.big_ticket === true || filters.big_ticket === 'true') {
+      conditions.push('p.big_ticket = 1')
+    }
+
+    // Filtro por envío express
+    if (filters.super_express === true || filters.super_express === 'true') {
+      conditions.push('p.super_express = 1')
+    }
+
+    // Filtro por recoger en tienda
+    if (filters.is_store_pickup === true || filters.is_store_pickup === 'true') {
+      conditions.push('p.is_store_pickup = 1')
+    }
+
+    // Filtro por productos disponibles por pedido
+    if (filters.back_order === true || filters.back_order === 'true') {
+      conditions.push('p.back_order = 1')
+    }
+
+    // Filtro por rango de días de envío
+    if (filters.max_shipping_days) {
+      conditions.push('p.shipping_days <= ?')
+      queryParams.push(parseInt(filters.max_shipping_days))
+    }
+
+    // Filtro por stock mínimo
+    if (filters.min_stock) {
+      conditions.push('p.stock >= ?')
+      queryParams.push(parseInt(filters.min_stock))
+    }
+
+    // Filtro por fecha de creación
+    if (filters.created_after) {
+      conditions.push('p.created_at >= ?')
+      queryParams.push(filters.created_after)
+    }
+
+    if (filters.created_before) {
+      conditions.push('p.created_at <= ?')
+      queryParams.push(filters.created_before)
     }
 
     return conditions
   }
 
-  // Construir ORDER BY
+  /**
+   * Construir ORDER BY
+   */
   static buildOrderBy(sortBy, sortOrder, query) {
     const order = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC'
     
     switch (sortBy) {
       case 'price':
         return ` ORDER BY p.sales_price ${order}`
+      case 'price_high':
+        return ` ORDER BY p.sales_price DESC`
+      case 'price_low':
+        return ` ORDER BY p.sales_price ASC`
       case 'rating':
         return ` ORDER BY p.review_rating ${order}, p.total_reviews DESC`
+      case 'reviews':
+        return ` ORDER BY p.total_reviews ${order}, p.review_rating DESC`
       case 'newest':
         return ` ORDER BY p.created_at DESC`
+      case 'oldest':
+        return ` ORDER BY p.created_at ASC`
       case 'name':
         return ` ORDER BY p.name ${order}`
-      case 'reviews':
-        return ` ORDER BY p.total_reviews ${order}`
+      case 'brand':
+        return ` ORDER BY p.brand ${order}, p.name ASC`
       case 'discount':
-        return ` ORDER BY p.percentage_discount ${order}`
+        return ` ORDER BY p.percentage_discount ${order}, p.sales_price ASC`
+      case 'shipping':
+        return ` ORDER BY p.has_free_shipping DESC, p.shipping_cost ASC, p.shipping_days ASC`
+      case 'stock':
+        return ` ORDER BY p.stock ${order}`
       case 'relevance':
       default:
-        if (query.trim()) {
+        if (query && query.trim()) {
           return ` ORDER BY p.relevance_score DESC, p.review_rating DESC, p.total_reviews DESC`
         }
         return ` ORDER BY p.relevance_score DESC, p.sales_price ASC`
     }
   }
 
-  // Obtener conteo total
+  /**
+   * Obtener conteo total
+   */
   static async getSearchCount(countSql, queryParams) {
     return await executeQuery(countSql, queryParams)
   }
 
-  // Enriquecer productos con datos adicionales
+  /**
+   * Enriquecer productos con datos adicionales
+   */
   static async enrichProducts(products) {
     if (!products.length) return products
 
     const productIds = products.map(p => p.id)
     const placeholders = productIds.map(() => '?').join(',')
 
-    // Obtener imágenes adicionales
-    const images = await executeQuery(`
-      SELECT product_id, image_url, thumbnail_url, image_order
-      FROM product_images 
-      WHERE product_id IN (${placeholders})
-      ORDER BY product_id, image_order
-    `, productIds)
-
-    // Obtener variaciones
-    const variations = await executeQuery(`
-      SELECT product_id, COUNT(*) as variation_count, SUM(stock) as total_stock
-      FROM product_variations 
-      WHERE product_id IN (${placeholders})
-      GROUP BY product_id
-    `, productIds)
+    // Obtener imágenes adicionales, variaciones y atributos en paralelo
+    const [images, variations, attributes] = await Promise.all([
+      this.getProductImages(productIds, placeholders),
+      this.getProductVariations(productIds, placeholders),
+      this.getProductAttributes(productIds, placeholders)
+    ])
 
     // Mapear datos adicionales
-    const imagesMap = {}
-    const variationsMap = {}
-
-    images.forEach(img => {
-      if (!imagesMap[img.product_id]) imagesMap[img.product_id] = []
-      imagesMap[img.product_id].push({
-        url: img.image_url,
-        thumbnail: img.thumbnail_url,
-        order: img.image_order
-      })
-    })
-
-    variations.forEach(v => {
-      variationsMap[v.product_id] = {
-        count: v.variation_count,
-        totalStock: v.total_stock
-      }
-    })
+    const imagesMap = this.groupByProductId(images)
+    const variationsMap = this.groupByProductId(variations, true)
+    const attributesMap = this.groupByProductId(attributes)
 
     // Enriquecer productos
     return products.map(product => ({
-      ...product,
+      ...this.normalizeProduct(product),
       images: imagesMap[product.id] || [],
-      variations: variationsMap[product.id] || { count: 0, totalStock: 0 },
+      variations: variationsMap[product.id] || { count: 0, totalStock: 0, options: [] },
+      attributes: attributesMap[product.id] || [],
       // Campos calculados
       hasDiscount: product.percentage_discount > 0,
-      finalPrice: product.sales_price,
-      savings: product.list_price ? product.list_price - product.sales_price : 0,
+      finalPrice: parseFloat(product.sales_price),
+      originalPrice: parseFloat(product.list_price),
+      savings: product.list_price ? parseFloat(product.list_price) - parseFloat(product.sales_price) : 0,
+      savingsPercentage: product.list_price ? 
+        Math.round(((parseFloat(product.list_price) - parseFloat(product.sales_price)) / parseFloat(product.list_price)) * 100) : 0,
       freeShipping: product.has_free_shipping === 1,
-      inStock: product.stock > 0
+      inStock: product.stock > 0,
+      lowStock: product.stock <= 5,
+      isNew: this.isNewProduct(product.created_at),
+      isPremium: parseFloat(product.sales_price) > 1000,
+      shippingInfo: this.getShippingInfo(product),
+      url: `/products/${product.id}`,
+      shareUrl: `${process.env.FRONTEND_URL || 'https://example.com'}/products/${product.id}`
     }))
   }
 
-  // Obtener facetas
-  static async getFacets(query = '', filters = {}) {
-    try {
-      // Construir query base para facetas (sin paginación)
-      const { sql: baseSql, queryParams: baseParams } = this.buildSearchQuery(
-        query, 
-        filters, 
-        'relevance', 
-        'desc', 
-        999999, 
-        0
-      )
+  /**
+   * Obtener imágenes de productos
+   */
+  static async getProductImages(productIds, placeholders) {
+    const sql = `
+      SELECT 
+        product_id, 
+        image_url, 
+        thumbnail_url, 
+        image_order
+      FROM product_images 
+      WHERE product_id IN (${placeholders})
+      ORDER BY product_id, image_order
+    `
+    
+    const results = await executeQuery(sql, productIds)
+    return results.map(img => ({
+      ...img,
+      url: img.image_url,
+      thumbnail: img.thumbnail_url,
+      order: img.image_order
+    }))
+  }
 
-      // Remover SELECT y ORDER BY para reutilizar WHERE
-      const whereClause = baseSql
-        .replace(/SELECT[\s\S]*?FROM products p/, '')
-        .replace(/ORDER BY[\s\S]*/, '')
-        .replace(/LIMIT[\s\S]*/, '')
+  /**
+   * Obtener variaciones de productos
+   */
+  static async getProductVariations(productIds, placeholders) {
+    const sql = `
+      SELECT 
+        product_id,
+        COUNT(*) as variation_count, 
+        SUM(stock) as total_stock,
+        GROUP_CONCAT(
+          JSON_OBJECT(
+            'sku', sku,
+            'size', size_name,
+            'color', color_name,
+            'stock', stock,
+            'priceModifier', price_modifier
+          )
+        ) as options
+      FROM product_variations 
+      WHERE product_id IN (${placeholders})
+      GROUP BY product_id
+    `
+    
+    const results = await executeQuery(sql, productIds)
+    return results.map(variation => ({
+      product_id: variation.product_id,
+      count: variation.variation_count,
+      totalStock: variation.total_stock || 0,
+      options: variation.options ? JSON.parse(`[${variation.options}]`) : []
+    }))
+  }
 
-      const whereParams = baseParams.slice(0, -2) // Sin LIMIT y OFFSET
+  /**
+   * Obtener atributos de productos
+   */
+  static async getProductAttributes(productIds, placeholders) {
+    const sql = `
+      SELECT 
+        product_id,
+        attribute_name as name,
+        attribute_value as value
+      FROM product_attributes 
+      WHERE product_id IN (${placeholders})
+      ORDER BY product_id, attribute_name
+    `
+    
+    return await executeQuery(sql, productIds)
+  }
 
-      // Ejecutar todas las consultas de facetas en paralelo
-      const [
-        brands,
-        categories,
-        priceRanges,
-        stores,
-        fulfillmentTypes,
-        ratings
-      ] = await Promise.all([
-        this.getBrandFacets(whereClause, whereParams, filters),
-        this.getCategoryFacets(whereClause, whereParams, filters),
-        this.getPriceFacets(whereClause, whereParams, filters),
-        this.getStoreFacets(whereClause, whereParams, filters),
-        this.getFulfillmentFacets(whereClause, whereParams, filters),
-        this.getRatingFacets(whereClause, whereParams, filters)
-      ])
-
-      return {
-        brands,
-        categories,
-        priceRanges,
-        stores,
-        fulfillmentTypes,
-        ratings
+  /**
+   * Agrupar resultados por product_id
+   */
+  static groupByProductId(items, isVariation = false) {
+    const grouped = {}
+    
+    items.forEach(item => {
+      if (!grouped[item.product_id]) {
+        grouped[item.product_id] = isVariation ? item : []
       }
-    } catch (error) {
-      console.error('Facets error:', error)
-      return {}
+      
+      if (!isVariation) {
+        grouped[item.product_id].push(item)
+      }
+    })
+    
+    return grouped
+  }
+
+  /**
+   * Normalizar datos del producto
+   */
+  static normalizeProduct(product) {
+    return {
+      id: product.id,
+      name: product.name,
+      description: product.description,
+      shortDescription: product.short_description,
+      sku: product.sku,
+      brand: product.brand,
+      price: parseFloat(product.sales_price),
+      listPrice: parseFloat(product.list_price),
+      shippingCost: parseFloat(product.shipping_cost),
+      discount: product.percentage_discount,
+      stock: product.stock,
+      categoryId: product.category_id,
+      categoryName: product.category_name,
+      categoryPath: product.category_path,
+      storeId: product.store_id,
+      storeName: product.store_name,
+      storeLogo: product.store_logo,
+      storeRating: parseFloat(product.store_rating),
+      isDigital: product.digital === 1,
+      isBigTicket: product.big_ticket === 1,
+      allowBackOrder: product.back_order === 1,
+      allowStorePickup: product.is_store_pickup === 1,
+      hasSuperExpress: product.super_express === 1,
+      shippingDays: product.shipping_days,
+      rating: parseFloat(product.review_rating) || 0,
+      reviewCount: product.total_reviews || 0,
+      mainImage: product.main_image,
+      thumbnail: product.thumbnail,
+      fulfillmentType: product.fulfillment_type,
+      freeShipping: product.has_free_shipping === 1,
+      relevanceScore: parseFloat(product.relevance_score),
+      createdAt: product.created_at,
+      updatedAt: product.updated_at
     }
   }
 
-  // Facetas por marca
-  static async getBrandFacets(whereClause, whereParams, filters) {
-    if (filters.brand) return [] // No mostrar si ya está filtrado
-
-    const sql = `
-      SELECT p.brand as value, COUNT(*) as count
-      FROM products p
-      ${whereClause}
-      AND p.brand IS NOT NULL
-      GROUP BY p.brand
-      ORDER BY count DESC
-      LIMIT 20
-    `
-    return await executeQuery(sql, whereParams)
+  /**
+   * Verificar si es un producto nuevo (últimos 30 días)
+   */
+  static isNewProduct(createdAt) {
+    if (!createdAt) return false
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    return new Date(createdAt) > thirtyDaysAgo
   }
 
-  // Facetas por categoría
-  static async getCategoryFacets(whereClause, whereParams, filters) {
-    const sql = `
-      SELECT 
-        p.category_lvl0 as value, 
-        COUNT(*) as count,
-        'lvl0' as level
-      FROM products p
-      ${whereClause}
-      AND p.category_lvl0 IS NOT NULL
-      GROUP BY p.category_lvl0
-      ORDER BY count DESC
-      LIMIT 10
-    `
-    return await executeQuery(sql, whereParams)
+  /**
+   * Obtener información de envío
+   */
+  static getShippingInfo(product) {
+    return {
+      isFree: product.has_free_shipping === 1,
+      cost: parseFloat(product.shipping_cost),
+      days: product.shipping_days,
+      hasExpress: product.super_express === 1,
+      allowPickup: product.is_store_pickup === 1,
+      fulfillmentType: product.fulfillment_type
+    }
   }
 
-  // Facetas por precio
-  static async getPriceFacets(whereClause, whereParams, filters) {
-    if (filters.min_price || filters.max_price) return []
-
-    const sql = `
-      SELECT 
-        CASE 
-          WHEN p.sales_price < 1000 THEN '0-999'
-          WHEN p.sales_price < 5000 THEN '1000-4999'
-          WHEN p.sales_price < 10000 THEN '5000-9999'
-          WHEN p.sales_price < 25000 THEN '10000-24999'
-          WHEN p.sales_price < 50000 THEN '25000-49999'
-          ELSE '50000+'
-        END as value,
-        COUNT(*) as count
-      FROM products p
-      ${whereClause}
-      GROUP BY value
-      ORDER BY MIN(p.sales_price)
-    `
-    return await executeQuery(sql, whereParams)
+  /**
+   * Obtener facetas para búsqueda
+   */
+  static async getFacetsForSearch(query, filters, mode) {
+    try {
+      if (mode === 'cached' && !query && Object.keys(filters).length === 0) {
+        // Usar FacetService para facetas rápidas
+        const { FacetService } = await import('./facetService.js')
+        return await FacetService.getQuickFacets(filters.category_id)
+      } else {
+        // Usar FacetService para facetas dinámicas
+        const { FacetService } = await import('./facetService.js')
+        return await FacetService.getFacets(query, filters, filters.category_id)
+      }
+    } catch (error) {
+      console.error('Error getting facets for search:', error)
+      return null
+    }
   }
 
-  // Facetas por tienda
-  static async getStoreFacets(whereClause, whereParams, filters) {
-    if (filters.store_id) return []
-
-    const sql = `
-      SELECT 
-        p.store_name as value,
-        p.store_id as id,
-        COUNT(*) as count,
-        ROUND(AVG(p.store_rating), 1) as rating
-      FROM products p
-      ${whereClause}
-      GROUP BY p.store_id, p.store_name
-      ORDER BY count DESC
-      LIMIT 15
-    `
-    return await executeQuery(sql, whereParams)
-  }
-
-  // Facetas por fulfillment
-  static async getFulfillmentFacets(whereClause, whereParams, filters) {
-    if (filters.fulfillment_type) return []
-
-    const sql = `
-      SELECT 
-        p.fulfillment_type as value,
-        COUNT(*) as count
-      FROM products p
-      ${whereClause}
-      GROUP BY p.fulfillment_type
-      ORDER BY count DESC
-    `
-    return await executeQuery(sql, whereParams)
-  }
-
-  // Facetas por rating
-  static async getRatingFacets(whereClause, whereParams, filters) {
-    const sql = `
-      SELECT 
-        CASE 
-          WHEN p.review_rating >= 4.5 THEN '4.5+'
-          WHEN p.review_rating >= 4.0 THEN '4.0+'
-          WHEN p.review_rating >= 3.5 THEN '3.5+'
-          WHEN p.review_rating >= 3.0 THEN '3.0+'
-          ELSE '2.9-'
-        END as value,
-        COUNT(*) as count
-      FROM products p
-      ${whereClause}
-      AND p.review_rating IS NOT NULL
-      GROUP BY value
-      ORDER BY MIN(p.review_rating) DESC
-    `
-    return await executeQuery(sql, whereParams)
-  }
-
-  // Búsqueda de autocompletado
-  static async getAutocompleteSuggestions(query, limit = 10) {
-    if (!query || query.length < 2) return []
-
-    const likeQuery = `${query}%`
+  /**
+   * Normalizar filtros
+   */
+  static normalizeFilters(filters) {
+    const normalized = {}
     
-    const sql = `
-      (SELECT DISTINCT name as suggestion, 'product' as type, 1 as priority
-       FROM products 
-       WHERE name LIKE ? AND status = 1 AND visible = 1
-       ORDER BY name LIMIT ?)
-      UNION
-      (SELECT DISTINCT brand as suggestion, 'brand' as type, 2 as priority
-       FROM products 
-       WHERE brand LIKE ? AND status = 1 AND visible = 1
-       ORDER BY brand LIMIT ?)
-      UNION  
-      (SELECT DISTINCT category_name as suggestion, 'category' as type, 3 as priority
-       FROM products 
-       WHERE category_name LIKE ? AND status = 1 AND visible = 1
-       ORDER BY category_name LIMIT ?)
-      ORDER BY priority, suggestion
-      LIMIT ?
-    `
-
-    return await executeQuery(sql, [
-      likeQuery, Math.ceil(limit * 0.6),
-      likeQuery, Math.ceil(limit * 0.2), 
-      likeQuery, Math.ceil(limit * 0.2),
-      limit
-    ])
+    Object.keys(filters).forEach(key => {
+      if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
+        normalized[key] = filters[key]
+      }
+    })
+    
+    return normalized
   }
+
+  // Mantener métodos existentes como simpleSearch, getAutocompleteSuggestions, etc.
+  
+  /**
+   * Búsqueda simple (mantener compatibilidad)
+   */
   static async simpleSearch(query = '', page = 1, limit = 20, filters = {}) {
     try {
-      let sql = `
-        SELECT 
-          p.id,
-          p.name,
-          p.description,
-          p.brand,
-          p.sales_price,
-          p.list_price,
-          p.stock,
-          p.category_name,
-          p.store_name,
-          p.review_rating,
-          p.total_reviews,
-          p.main_image,
-          p.relevance_score,
-          p.has_free_shipping,
-          p.fulfillment_type,
-          p.percentage_discount
-        FROM products p
-        WHERE p.status = 1 
-          AND p.visible = 1 
-          AND p.store_authorized = 1
-          AND p.stock > 0
-      `
-      
-      const params = []
-      
-      // Búsqueda por texto
-      if (query && query.trim()) {
-        sql += ` AND (p.name LIKE ? OR p.brand LIKE ? OR p.description LIKE ?)`
-        const likeQuery = `%${query.trim()}%`
-        params.push(likeQuery, likeQuery, likeQuery)
-      }
-      
-      // Filtros básicos
-      if (filters.brand) {
-        sql += ` AND p.brand = ?`
-        params.push(filters.brand)
-      }
-      
-      if (filters.category_id) {
-        sql += ` AND p.category_id = ?`
-        params.push(Number(filters.category_id))
-      }
-      
-      if (filters.min_price) {
-        sql += ` AND p.sales_price >= ?`
-        params.push(Number(filters.min_price))
-      }
-      
-      if (filters.max_price) {
-        sql += ` AND p.sales_price <= ?`
-        params.push(Number(filters.max_price))
-      }
-      
-      if (filters.free_shipping === 'true') {
-        sql += ` AND p.has_free_shipping = 1`
-      }
-      
-      if (filters.fulfillment_type) {
-        sql += ` AND p.fulfillment_type = ?`
-        params.push(filters.fulfillment_type)
-      }
-      
-      if (filters.min_rating) {
-        sql += ` AND p.review_rating >= ?`
-        params.push(Number(filters.min_rating))
-      }
-      
-      // Ordenamiento
-      const sortBy = filters.sort || 'relevance'
-      switch (sortBy) {
-        case 'price':
-          sql += ` ORDER BY p.sales_price ${filters.order === 'desc' ? 'DESC' : 'ASC'}`
-          break
-        case 'rating':
-          sql += ` ORDER BY p.review_rating DESC, p.total_reviews DESC`
-          break
-        case 'newest':
-          sql += ` ORDER BY p.created_at DESC`
-          break
-        case 'name':
-          sql += ` ORDER BY p.name ${filters.order === 'desc' ? 'DESC' : 'ASC'}`
-          break
-        case 'discount':
-          sql += ` ORDER BY p.percentage_discount DESC`
-          break
-        default: // relevance
-          sql += ` ORDER BY p.relevance_score DESC, p.review_rating DESC, p.total_reviews DESC`
-      }
-      
-      // Paginación
-      const offset = (page - 1) * limit
-      sql += ` LIMIT ? OFFSET ?`
-      params.push(Number(limit), Number(offset))
-      
-      console.log('🔍 Final SQL:', sql)
-      console.log('📊 Final Params:', params)
-      
-      // Ejecutar query principal
-      const products = await executeQuery(sql, params)
-      
-      // Query para conteo total (sin LIMIT/OFFSET)
-      let countSql = `
-        SELECT COUNT(*) as total
-        FROM products p
-        WHERE p.status = 1 
-          AND p.visible = 1 
-          AND p.store_authorized = 1
-          AND p.stock > 0
-      `
-      const countParams = []
-      
-      // Aplicar los mismos filtros para el conteo
-      if (query && query.trim()) {
-        countSql += ` AND (p.name LIKE ? OR p.brand LIKE ? OR p.description LIKE ?)`
-        const likeQuery = `%${query.trim()}%`
-        countParams.push(likeQuery, likeQuery, likeQuery)
-      }
-      
-      if (filters.brand) {
-        countSql += ` AND p.brand = ?`
-        countParams.push(filters.brand)
-      }
-      
-      if (filters.category_id) {
-        countSql += ` AND p.category_id = ?`
-        countParams.push(Number(filters.category_id))
-      }
-      
-      if (filters.min_price) {
-        countSql += ` AND p.sales_price >= ?`
-        countParams.push(Number(filters.min_price))
-      }
-      
-      if (filters.max_price) {
-        countSql += ` AND p.sales_price <= ?`
-        countParams.push(Number(filters.max_price))
-      }
-      
-      if (filters.free_shipping === 'true') {
-        countSql += ` AND p.has_free_shipping = 1`
-      }
-      
-      if (filters.fulfillment_type) {
-        countSql += ` AND p.fulfillment_type = ?`
-        countParams.push(filters.fulfillment_type)
-      }
-      
-      if (filters.min_rating) {
-        countSql += ` AND p.review_rating >= ?`
-        countParams.push(Number(filters.min_rating))
-      }
-      
-      const [countResult] = await executeQuery(countSql, countParams)
+      const results = await this.searchProducts({
+        query,
+        page,
+        limit,
+        filters,
+        facets: false
+      })
       
       return {
-        products: products.map(product => ({
-          id: product.id,
-          name: product.name,
-          description: product.description,
-          brand: product.brand,
-          price: parseFloat(product.sales_price),
-          originalPrice: parseFloat(product.list_price),
-          stock: product.stock,
-          category: product.category_name,
-          store: product.store_name,
-          rating: parseFloat(product.review_rating),
-          reviewCount: product.total_reviews,
-          image: product.main_image,
-          freeShipping: product.has_free_shipping === 1,
-          fulfillment: product.fulfillment_type,
-          discount: product.percentage_discount,
-          relevance: parseFloat(product.relevance_score)
-        })),
-        total: countResult.total,
-        page: Number(page),
-        limit: Number(limit)
+        products: results.products,
+        total: results.pagination.total,
+        page: results.pagination.page,
+        limit: results.pagination.limit
       }
-      
     } catch (error) {
-      console.error('Search error:', error)
+      console.error('Simple search error:', error)
       throw error
     }
   }
 
-  // Función para debugging directo
+  /**
+   * Autocompletado de búsquedas
+   */
+  static async getAutocompleteSuggestions(query, limit = 10) {
+    if (!query || query.length < 2) return []
+
+    try {
+      const likeQuery = `${query}%`
+      
+      const sql = `
+        (SELECT DISTINCT name as suggestion, 'product' as type, 1 as priority
+         FROM products 
+         WHERE name LIKE ? AND status = 1 AND visible = 1
+         ORDER BY name LIMIT ?)
+        UNION
+        (SELECT DISTINCT brand as suggestion, 'brand' as type, 2 as priority
+         FROM products 
+         WHERE brand LIKE ? AND status = 1 AND visible = 1
+         ORDER BY brand LIMIT ?)
+        UNION  
+        (SELECT DISTINCT category_name as suggestion, 'category' as type, 3 as priority
+         FROM products 
+         WHERE category_name LIKE ? AND status = 1 AND visible = 1
+         ORDER BY category_name LIMIT ?)
+        ORDER BY priority, suggestion
+        LIMIT ?
+      `
+
+      return await executeQuery(sql, [
+        likeQuery, Math.ceil(limit * 0.6),
+        likeQuery, Math.ceil(limit * 0.2), 
+        likeQuery, Math.ceil(limit * 0.2),
+        limit
+      ])
+    } catch (error) {
+      console.error('Autocomplete error:', error)
+      return []
+    }
+  }
+
+  /**
+   * Obtener producto por ID
+   */
+  static async getProductById(productId) {
+    try {
+      const sql = `
+        SELECT * FROM products 
+        WHERE id = ? AND status = 1 AND visible = 1 AND store_authorized = 1
+      `
+      
+      const [product] = await executeQuery(sql, [productId])
+      
+      if (!product) return null
+      
+      // Enriquecer con datos adicionales
+      const enriched = await this.enrichProducts([product])
+      return enriched[0] || null
+    } catch (error) {
+      console.error('Get product by ID error:', error)
+      return null
+    }
+  }
+
+  /**
+   * Productos trending/populares
+   */
+  static async getTrendingProducts(limit = 20, categoryId = null) {
+    try {
+      let sql = `
+        SELECT 
+          p.*,
+          (p.total_reviews * p.review_rating) as popularity_score
+        FROM products p
+        WHERE p.status = 1 AND p.visible = 1 AND p.store_authorized = 1
+          AND p.stock > 0
+          AND p.total_reviews > 0
+      `
+      const params = []
+      
+      if (categoryId) {
+        sql += ` AND p.category_id = ?`
+        params.push(categoryId)
+      }
+      
+      sql += `
+        ORDER BY popularity_score DESC, p.created_at DESC
+        LIMIT ?
+      `
+      params.push(limit)
+      
+      const products = await executeQuery(sql, params)
+      return await this.enrichProducts(products)
+    } catch (error) {
+      console.error('Get trending products error:', error)
+      return []
+    }
+  }
+
+  /**
+   * Debugging directo
+   */
   static async debugSearch() {
     try {
-      // Query SIN parámetros primero
       const sql1 = `
         SELECT 
           p.id,
@@ -707,7 +846,6 @@ export class SearchService {
       const result1 = await executeQuery(sql1, [])
       console.log('✅ Query without params works:', result1.length, 'results')
       
-      // Query CON parámetros simples
       const sql2 = `
         SELECT 
           p.id,
@@ -722,7 +860,6 @@ export class SearchService {
       const result2 = await executeQuery(sql2, [1, 5])
       console.log('✅ Query with simple params works:', result2.length, 'results')
       
-      // Query con LIKE
       const sql3 = `
         SELECT 
           p.id,
@@ -738,7 +875,6 @@ export class SearchService {
       console.log('✅ Query with LIKE works:', result3.length, 'results')
       
       return result3
-      
     } catch (error) {
       console.error('❌ Debug search error:', error)
       throw error
