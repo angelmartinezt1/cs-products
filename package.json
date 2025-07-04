@@ -15,6 +15,9 @@
     "extends": "standard"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "mysql2": "^3.14.1"
   },
   "devDependencies": {
     "eslint": "^9.30.0",
