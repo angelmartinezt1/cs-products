@@ -1,0 +1,23 @@
+{
+  "name": "cs-products",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=.env --watch src/index.js",
+    "sam": "sam build && sam deploy",
+    "build": "echo 'No build step needed'"
+  },
+  "keywords": [],
+  "author": "Juan Angel Martínez López",
+  "eslintConfig": {
+    "extends": "standard"
+  },
+  "dependencies": {
+  },
+  "devDependencies": {
+    "eslint": "^9.30.0",
+    "neostandard": "^0.12.1"
+  }
+}
