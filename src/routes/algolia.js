@@ -258,52 +258,84 @@ function parseFilter(filterString, filters) {
 /**
  * Convertir resultado a formato Algolia
  */
+/**
+ * Convertir resultado a formato Algolia
+ */
 function convertToAlgoliaFormat(searchResults, algoliaParams) {
-  const hits = searchResults.products.map(product => ({
-    objectID: product.id.toString(),
-    title: product.name,
-    ean: product.sku,
-    sku: product.sku,
-    brand: product.brand,
-    price: product.sales_price,
-    sale_price: product.sales_price,
-    stock: product.stock,
-    is_active: product.status === 1,
-    relevance_amount: Math.floor(Math.random() * 10000), // Simular relevance
-    relevance_sales: Math.floor(Math.random() * 20),
-    percent_off: product.percentage_discount,
-    description: product.description,
-    fulfillment: product.fulfillment_type === 'fulfillment',
-    has_free_shipping: product.has_free_shipping === 1,
-    store_only: product.is_store_only === 1,
-    store_pickup: product.is_store_pickup === 1,
-    photos: product.main_image ? [{
-      id: Math.floor(Math.random() * 1000000),
-      source: product.main_image,
-      thumbnail: product.thumbnail || product.main_image
-    }] : [],
-    attributes: {},
-    categories: {
-      [product.category_id]: product.category_name
-    },
-    hirerarchical_category: {
-      lvl0: product.category_lvl0 ? [product.category_lvl0] : [],
-      lvl1: product.category_lvl1 ? [product.category_lvl1] : [],
-      lvl2: product.category_lvl2 ? [product.category_lvl2] : []
-    },
-    sellers: [{
-      id: product.store_id,
-      name: product.store_name,
-      store_rating: product.store_rating
-    }],
-    review_rating: product.review_rating || 0,
-    total_reviews: product.total_reviews || 0,
-    store_rating: product.store_rating,
-    indexing_date: Math.floor(Date.now() / 1000),
-    _highlightResult: generateHighlightResult(product, algoliaParams.query)
-  }))
+  const hits = searchResults.products.map(product => {
+    // DEBUGGING: Log the category values to see what we're getting
+    console.log(`Product ${product.id} categories:`, {
+      category_lvl0: product.category_lvl0,
+      category_lvl1: product.category_lvl1, 
+      category_lvl2: product.category_lvl2,
+      category_path: product.category_path
+    });
+
+    // Parse category path if individual levels are missing
+    let lvl0 = product.category_lvl0;
+    let lvl1 = product.category_lvl1;
+    let lvl2 = product.category_lvl2;
+
+    // FALLBACK: If category levels are null but we have category_path, parse it
+    if ((!lvl0 || !lvl1 || !lvl2) && product.category_path) {
+      const pathParts = product.category_path.split(' > ').map(part => part.trim());
+      if (pathParts.length >= 1 && !lvl0) lvl0 = pathParts[0];
+      if (pathParts.length >= 2 && !lvl1) lvl1 = pathParts.slice(0, 2).join(' > ');
+      if (pathParts.length >= 3 && !lvl2) lvl2 = pathParts.join(' > ');
+    }
+
+    // FALLBACK: Use category_name as last resort
+    if (!lvl0 && product.category_name) {
+      lvl0 = product.category_name;
+    }
+
+    return {
+      objectID: product.id.toString(),
+      title: product.name,
+      ean: product.sku,
+      sku: product.sku,
+      brand: product.brand,
+      price: product.sales_price,
+      sale_price: product.sales_price,
+      stock: product.stock,
+      is_active: product.status === 1,
+      relevance_amount: Math.floor(Math.random() * 10000),
+      relevance_sales: Math.floor(Math.random() * 20),
+      percent_off: product.percentage_discount,
+      description: product.description,
+      fulfillment: product.fulfillment_type === 'fulfillment',
+      has_free_shipping: product.has_free_shipping === 1,
+      store_only: product.is_store_only === 1,
+      store_pickup: product.is_store_pickup === 1,
+      photos: product.main_image ? [{
+        id: Math.floor(Math.random() * 1000000),
+        source: product.main_image,
+        thumbnail: product.thumbnail || product.main_image
+      }] : [],
+      attributes: {},
+      categories: {
+        [product.category_id]: product.category_name
+      },
+      // FIXED: Better handling of hierarchical categories
+      hirerarchical_category: {
+        lvl0: lvl0 ? [lvl0] : [],
+        lvl1: lvl1 ? [lvl1] : [],
+        lvl2: lvl2 ? [lvl2] : []
+      },
+      sellers: [{
+        id: product.store_id,
+        name: product.store_name,
+        store_rating: product.store_rating
+      }],
+      review_rating: product.review_rating || 0,
+      total_reviews: product.total_reviews || 0,
+      store_rating: product.store_rating,
+      indexing_date: Math.floor(Date.now() / 1000),
+      _highlightResult: generateHighlightResult(product, algoliaParams.query)
+    }
+  });
   
-  const totalPages = Math.ceil(searchResults.pagination.total / algoliaParams.hitsPerPage)
+  const totalPages = Math.ceil(searchResults.pagination.total / algoliaParams.hitsPerPage);
   
   return {
     hits,
