@@ -5,7 +5,6 @@ import { SearchService } from '../services/searchService.js'
 
 const router = express.Router()
 
-
 router.post('/1/indexes/queries', async (req, res, next) => {
   try {
     const { requests } = req.body
@@ -258,10 +257,14 @@ function parseFilter(filterString, filters) {
 /**
  * Convertir resultado a formato Algolia
  */
-/**
- * Convertir resultado a formato Algolia
- */
 function convertToAlgoliaFormat(searchResults, algoliaParams) {
+  // 🔍 DEBUGGING TEMPORAL - Agregar estos logs
+  console.log('🔍 DEBUG - SearchResults facets:', searchResults.facets);
+  console.log('🔍 DEBUG - Requested facets:', algoliaParams.facets);
+  if (searchResults.facets) {
+    console.log('🔍 DEBUG - Facets keys:', Object.keys(searchResults.facets));
+  }
+
   const hits = searchResults.products.map(product => {
     // DEBUGGING: Log the category values to see what we're getting
     console.log(`Product ${product.id} categories:`, {
@@ -337,13 +340,17 @@ function convertToAlgoliaFormat(searchResults, algoliaParams) {
   
   const totalPages = Math.ceil(searchResults.pagination.total / algoliaParams.hitsPerPage);
   
+  // 🔍 DEBUGGING TEMPORAL - Log de conversión de facetas
+  const convertedFacets = searchResults.facets ? convertFacetsToAlgoliaFormat(searchResults.facets, algoliaParams.facets) : {};
+  console.log('🔍 DEBUG - Converted facets:', convertedFacets);
+  
   return {
     hits,
     nbHits: searchResults.pagination.total,
     page: algoliaParams.page,
     nbPages: totalPages,
     hitsPerPage: algoliaParams.hitsPerPage,
-    facets: searchResults.facets ? convertFacetsToAlgoliaFormat(searchResults.facets, algoliaParams.facets) : {},
+    facets: convertedFacets,
     facets_stats: searchResults.facets ? calculateFacetStats(searchResults.facets) : {},
     exhaustiveFacetsCount: true,
     exhaustiveNbHits: true,
@@ -364,69 +371,109 @@ function convertToAlgoliaFormat(searchResults, algoliaParams) {
   }
 }
 
-/**
- * Convertir facetas a formato Algolia
- */
 function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
+  console.log('🔄 convertFacetsToAlgoliaFormat called with:');
+  console.log('  - facets:', facets);
+  console.log('  - requestedFacets:', requestedFacets);
+  
   const algoliaFacets = {}
   
-  if (!facets || !requestedFacets) return algoliaFacets
+  if (!facets || !requestedFacets) {
+    console.log('❌ Early return - missing facets or requestedFacets');
+    return algoliaFacets;
+  }
   
   requestedFacets.forEach(facetName => {
+    console.log(`🔍 Processing facet: ${facetName}`);
+    
     switch (facetName) {
       case 'brand':
-        if (facets.brand) {
+        // FIX: Use 'brands' (plural) from your FacetService
+        if (facets.brands) {
           algoliaFacets.brand = {}
-          facets.brand.forEach(item => {
-            algoliaFacets.brand[item.value] = item.count
-          })
+          facets.brands.forEach(item => {
+            algoliaFacets.brand[item.value] = parseInt(item.count);
+          });
         }
         break
+        
+      case 'fulfillment':
+        // FIX: Use 'fulfillmentTypes' from your FacetService
+        if (facets.fulfillmentTypes) {
+          algoliaFacets.fulfillment = {}
+          facets.fulfillmentTypes.forEach(item => {
+            algoliaFacets.fulfillment[item.value] = parseInt(item.count);
+          });
+        }
+        break
+        
+      case 'has_free_shipping':
+        // FIX: Extract from shippingOptions
+        if (facets.shippingOptions) {
+          algoliaFacets.has_free_shipping = {}
+          facets.shippingOptions.forEach(item => {
+            if (item.value === 'Envío Gratis') {
+              algoliaFacets.has_free_shipping['true'] = parseInt(item.count);
+            } else {
+              // Sum all non-free shipping options
+              algoliaFacets.has_free_shipping['false'] = (algoliaFacets.has_free_shipping['false'] || 0) + parseInt(item.count);
+            }
+          });
+        }
+        break
+        
       case 'hirerarchical_category.lvl0':
-        if (facets.category_lvl0) {
+        // FIX: Extract from categories
+        if (facets.categories) {
           algoliaFacets['hirerarchical_category.lvl0'] = {}
-          facets.category_lvl0.forEach(item => {
-            algoliaFacets['hirerarchical_category.lvl0'][item.value] = item.count
-          })
+          facets.categories.forEach(item => {
+            algoliaFacets['hirerarchical_category.lvl0'][item.value] = parseInt(item.count);
+          });
         }
         break
+        
       case 'hirerarchical_category.lvl1':
-        if (facets.category_lvl1) {
-          algoliaFacets['hirerarchical_category.lvl1'] = {}
-          facets.category_lvl1.forEach(item => {
-            algoliaFacets['hirerarchical_category.lvl1'][item.value] = item.count
-          })
-        }
+        // This might need to be generated or come from a different source
+        algoliaFacets['hirerarchical_category.lvl1'] = {}
         break
+        
       case 'hirerarchical_category.lvl2':
-        if (facets.category_lvl2) {
-          algoliaFacets['hirerarchical_category.lvl2'] = {}
-          facets.category_lvl2.forEach(item => {
-            algoliaFacets['hirerarchical_category.lvl2'][item.value] = item.count
-          })
+        // This might need to be generated or come from a different source
+        algoliaFacets['hirerarchical_category.lvl2'] = {}
+        break
+        
+      case 'review_rating':
+        // FIX: Use 'ratings' from your FacetService
+        if (facets.ratings) {
+          algoliaFacets.review_rating = {}
+          facets.ratings.forEach(item => {
+            algoliaFacets.review_rating[item.value] = parseInt(item.count);
+          });
         }
         break
+        
       case 'sale_price':
-        if (facets.price_range) {
+        // FIX: Use 'priceRanges' from your FacetService
+        if (facets.priceRanges) {
           algoliaFacets.sale_price = {}
-          facets.price_range.forEach(item => {
-            // Convertir rangos a precios específicos
-            const [min, max] = item.value.split('-').map(Number)
-            algoliaFacets.sale_price[`${min}.0`] = item.count
-          })
+          facets.priceRanges.forEach(item => {
+            // Use the min value as key
+            algoliaFacets.sale_price[`${item.min}.0`] = parseInt(item.count);
+          });
         }
         break
+        
+      case 'percent_off':
+        // This would need to be added to your FacetService if you want discount ranges
+        algoliaFacets.percent_off = {}
+        break
+        
       default:
-        // Manejar otras facetas genéricamente
-        if (facets[facetName]) {
-          algoliaFacets[facetName] = {}
-          facets[facetName].forEach(item => {
-            algoliaFacets[facetName][item.value] = item.count
-          })
-        }
+        console.log(`  - Unhandled facet type: ${facetName}`);
     }
-  })
+  });
   
+  console.log('✅ Final algoliaFacets:', algoliaFacets);
   return algoliaFacets
 }
 
