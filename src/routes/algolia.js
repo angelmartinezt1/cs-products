@@ -182,6 +182,9 @@ function parseAlgoliaParams(paramsString) {
  */
 function convertAlgoliaToOurFormat(algoliaParams) {
   const filters = extractFiltersFromAlgolia(algoliaParams)
+
+  console.log('🔧 Filters being passed to SearchService:', filters);
+
   
   return {
     query: algoliaParams.query || '',

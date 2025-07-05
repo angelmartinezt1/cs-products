@@ -33,14 +33,14 @@ export class FacetService {
       ])
 
       return {
-        brands,
-        categories,
-        priceRanges,
-        stores,
-        fulfillmentTypes,
-        ratings,
-        features,
-        shippingOptions,
+        brands: Array.isArray(brands) ? brands : [],
+        categories: Array.isArray(categories) ? categories : [],
+        priceRanges: Array.isArray(priceRanges) ? priceRanges : [],
+        stores: Array.isArray(stores) ? stores : [],
+        fulfillmentTypes: Array.isArray(fulfillmentTypes) ? fulfillmentTypes : [],
+        ratings: Array.isArray(ratings) ? ratings : [],
+        features: Array.isArray(features) ? features : [],
+        shippingOptions: Array.isArray(shippingOptions) ? shippingOptions : [],
         appliedFilters: this.getAppliedFilters(filters),
         totalProducts: await this.getTotalProductCount(whereClause, params)
       }
@@ -51,7 +51,7 @@ export class FacetService {
   }
 
   /**
-   * Construye la cláusula WHERE base para facetas
+   * Construye la cláusula WHERE base para facetas - CORREGIDO
    */
   static buildWhereClause(searchQuery, filters, categoryId) {
     let whereClause = `
@@ -60,6 +60,8 @@ export class FacetService {
         AND p.store_authorized = 1
         AND p.stock > 0
     `
+
+    console.log('🔧 FacetService buildWhereClause called with filters:', filters);
 
     // Búsqueda por texto
     if (searchQuery && searchQuery.trim()) {
@@ -70,22 +72,23 @@ export class FacetService {
       )`
     }
 
-    // Filtro por categoría específica
+    // Filtro por categoría específica (del parámetro categoryId)
     if (categoryId) {
       whereClause += ` AND p.category_id = ?`
     }
 
-    // Aplicar otros filtros
+    // CORREGIDO: Aplicar otros filtros usando buildFilterConditions
     const filterConditions = this.buildFilterConditions(filters)
     if (filterConditions.length > 0) {
       whereClause += ` AND (${filterConditions.join(' AND ')})`
     }
 
+    console.log('  - Final whereClause:', whereClause);
     return whereClause
   }
 
   /**
-   * Construye los parámetros para las consultas
+   * Construye los parámetros para las consultas - CORREGIDO
    */
   static buildQueryParams(searchQuery, filters, categoryId) {
     const params = []
@@ -101,10 +104,11 @@ export class FacetService {
       params.push(categoryId)
     }
 
-    // Parámetros de filtros
+    // CORREGIDO: Parámetros de filtros usando getFilterParams
     const filterParams = this.getFilterParams(filters)
     params.push(...filterParams)
 
+    console.log('  - Final query params:', params);
     return params
   }
 
@@ -125,7 +129,7 @@ export class FacetService {
       ${whereClause}
       AND p.brand IS NOT NULL
       GROUP BY p.brand
-      HAVING count >= 2
+      HAVING count >= 1
       ORDER BY count DESC, avg_rating DESC
       LIMIT 30
     `
@@ -142,89 +146,43 @@ export class FacetService {
     }))
   }
 
-/**
- * Facetas de categorías jerárquicas (CORREGIDO)
- */
-static async getCategoryFacets(whereClause, params, filters, currentCategoryId) {
-  // Si no estamos en una categoría específica, mostrar nivel 0
-  if (!currentCategoryId) {
-    const sql = `
-      SELECT 
-        p.category_lvl0 as value,
-        p.category_id,
-        COUNT(*) as count,
-        AVG(p.sales_price) as avg_price
-      FROM products p
-      ${whereClause}
-      AND p.category_lvl0 IS NOT NULL
-      GROUP BY p.category_lvl0, p.category_id
-      ORDER BY count DESC
-      LIMIT 15
-    `
-    return await executeQuery(sql, params)
-  } else {
-    // Obtener subcategorías del nivel actual
-    const subCategorySql = `
-      SELECT 
-        p.category_lvl2 as value,
-        COUNT(*) as count
-      FROM products p
-      ${whereClause}
-      AND p.category_lvl2 IS NOT NULL
-      AND p.category_lvl2 != p.category_lvl1
-      GROUP BY p.category_lvl2
-      ORDER BY count DESC
-      LIMIT 20
-    `
-    return await executeQuery(subCategorySql, params)
-  }
-}
-
-// Y actualizar el método principal getFacets para manejar mejor las categorías:
-
-static async getFacets(searchQuery = '', filters = {}, categoryId = null) {
-  try {
-    const whereClause = this.buildWhereClause(searchQuery, filters, categoryId)
-    const params = this.buildQueryParams(searchQuery, filters, categoryId)
-    
-    // Ejecutar todas las consultas de facetas en paralelo
-    const [
-      brands,
-      categories,
-      priceRanges,
-      stores,
-      fulfillmentTypes,
-      ratings,
-      features,
-      shippingOptions
-    ] = await Promise.all([
-      this.getBrandFacets(whereClause, params, filters),
-      this.getCategoryFacets(whereClause, params, filters, categoryId),
-      this.getPriceRangeFacets(whereClause, params, filters),
-      this.getStoreFacets(whereClause, params, filters),
-      this.getFulfillmentFacets(whereClause, params, filters),
-      this.getRatingFacets(whereClause, params, filters),
-      this.getFeatureFacets(whereClause, params, filters),
-      this.getShippingFacets(whereClause, params, filters)
-    ])
-
-    return {
-      brands: Array.isArray(brands) ? brands : [],
-      categories: Array.isArray(categories) ? categories : [],
-      priceRanges: Array.isArray(priceRanges) ? priceRanges : [],
-      stores: Array.isArray(stores) ? stores : [],
-      fulfillmentTypes: Array.isArray(fulfillmentTypes) ? fulfillmentTypes : [],
-      ratings: Array.isArray(ratings) ? ratings : [],
-      features: Array.isArray(features) ? features : [],
-      shippingOptions: Array.isArray(shippingOptions) ? shippingOptions : [],
-      appliedFilters: this.getAppliedFilters(filters),
-      totalProducts: await this.getTotalProductCount(whereClause, params)
+  /**
+   * Facetas de categorías jerárquicas (CORREGIDO)
+   */
+  static async getCategoryFacets(whereClause, params, filters, currentCategoryId) {
+    // Si no estamos en una categoría específica, mostrar nivel 0
+    if (!currentCategoryId) {
+      const sql = `
+        SELECT 
+          p.category_lvl0 as value,
+          p.category_id,
+          COUNT(*) as count,
+          AVG(p.sales_price) as avg_price
+        FROM products p
+        ${whereClause}
+        AND p.category_lvl0 IS NOT NULL
+        GROUP BY p.category_lvl0, p.category_id
+        ORDER BY count DESC
+        LIMIT 15
+      `
+      return await executeQuery(sql, params)
+    } else {
+      // Obtener subcategorías del nivel actual
+      const subCategorySql = `
+        SELECT 
+          p.category_lvl2 as value,
+          COUNT(*) as count
+        FROM products p
+        ${whereClause}
+        AND p.category_lvl2 IS NOT NULL
+        AND p.category_lvl2 != p.category_lvl1
+        GROUP BY p.category_lvl2
+        ORDER BY count DESC
+        LIMIT 20
+      `
+      return await executeQuery(subCategorySql, params)
     }
-  } catch (error) {
-    console.error('Error getting facets:', error)
-    throw error
   }
-}
 
   /**
    * Facetas de rangos de precio dinámicos
@@ -290,7 +248,7 @@ static async getFacets(searchQuery = '', filters = {}, categoryId = null) {
       FROM products p
       ${whereClause}
       GROUP BY p.store_id, p.store_name
-      HAVING count >= 3
+      HAVING count >= 1
       ORDER BY count DESC, avg_rating DESC
       LIMIT 20
     `
@@ -461,11 +419,30 @@ static async getFacets(searchQuery = '', filters = {}, categoryId = null) {
   }
 
   /**
-   * Construye condiciones de filtro para WHERE
+   * Construye condiciones de filtro para WHERE - CORREGIDO CON SOPORTE PARA CATEGORÍAS
    */
   static buildFilterConditions(filters) {
     const conditions = []
 
+    console.log('🔧 FacetService buildFilterConditions called with:', filters);
+
+    // FILTROS DE CATEGORÍA - AGREGADOS
+    if (filters.category_lvl0) {
+      conditions.push('p.category_lvl0 = ?')
+      console.log('  - Added category_lvl0 filter:', filters.category_lvl0);
+    }
+    
+    if (filters.category_lvl1) {
+      conditions.push('p.category_lvl1 = ?')
+      console.log('  - Added category_lvl1 filter:', filters.category_lvl1);
+    }
+    
+    if (filters.category_lvl2) {
+      conditions.push('p.category_lvl2 = ?')
+      console.log('  - Added category_lvl2 filter:', filters.category_lvl2);
+    }
+
+    // FILTROS EXISTENTES
     if (filters.brand) {
       if (Array.isArray(filters.brand)) {
         conditions.push(`p.brand IN (${filters.brand.map(() => '?').join(',')})`)
@@ -510,15 +487,30 @@ static async getFacets(searchQuery = '', filters = {}, categoryId = null) {
       conditions.push('p.percentage_discount > 0')
     }
 
+    console.log('  - Final conditions:', conditions);
     return conditions
   }
 
   /**
-   * Obtiene parámetros para filtros
+   * Obtiene parámetros para filtros - CORREGIDO CON SOPORTE PARA CATEGORÍAS
    */
   static getFilterParams(filters) {
     const params = []
 
+    // PARÁMETROS DE CATEGORÍA - AGREGADOS
+    if (filters.category_lvl0) {
+      params.push(filters.category_lvl0)
+    }
+    
+    if (filters.category_lvl1) {
+      params.push(filters.category_lvl1)
+    }
+    
+    if (filters.category_lvl2) {
+      params.push(filters.category_lvl2)
+    }
+
+    // PARÁMETROS EXISTENTES
     if (filters.brand) {
       if (Array.isArray(filters.brand)) {
         params.push(...filters.brand)
@@ -540,6 +532,7 @@ static async getFacets(searchQuery = '', filters = {}, categoryId = null) {
     if (filters.min_rating) params.push(parseFloat(filters.min_rating))
     if (filters.fulfillment_type) params.push(filters.fulfillment_type)
 
+    console.log('  - Final params:', params);
     return params
   }
 
@@ -548,6 +541,17 @@ static async getFacets(searchQuery = '', filters = {}, categoryId = null) {
    */
   static getAppliedFilters(filters) {
     const applied = []
+
+    // FILTROS DE CATEGORÍA
+    if (filters.category_lvl0) {
+      applied.push({ type: 'category_lvl0', value: filters.category_lvl0, label: `Categoría: ${filters.category_lvl0}` })
+    }
+    if (filters.category_lvl1) {
+      applied.push({ type: 'category_lvl1', value: filters.category_lvl1, label: `Subcategoría: ${filters.category_lvl1}` })
+    }
+    if (filters.category_lvl2) {
+      applied.push({ type: 'category_lvl2', value: filters.category_lvl2, label: `Categoría específica: ${filters.category_lvl2}` })
+    }
 
     if (filters.brand) {
       const brands = Array.isArray(filters.brand) ? filters.brand : [filters.brand]
