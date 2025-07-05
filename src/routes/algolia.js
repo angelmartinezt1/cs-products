@@ -297,7 +297,7 @@ function convertToAlgoliaFormat(searchResults, algoliaParams) {
       sku: product.sku,
       brand: product.brand,
       price: product.sales_price,
-      sale_price: product.sales_price,
+      sale_price: product.list_price,
       stock: product.stock,
       is_active: product.status === 1,
       relevance_amount: Math.floor(Math.random() * 10000),
