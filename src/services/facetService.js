@@ -20,7 +20,10 @@ export class FacetService {
         fulfillmentTypes,
         ratings,
         features,
-        shippingOptions
+        shippingOptions,
+        priceStats,
+        discountStats,
+        ratingStats
       ] = await Promise.all([
         this.getBrandFacets(whereClause, params, filters),
         this.getCategoryFacets(whereClause, params, filters, categoryId),
@@ -29,7 +32,10 @@ export class FacetService {
         this.getFulfillmentFacets(whereClause, params, filters),
         this.getRatingFacets(whereClause, params, filters),
         this.getFeatureFacets(whereClause, params, filters),
-        this.getShippingFacets(whereClause, params, filters)
+        this.getShippingFacets(whereClause, params, filters),
+        this.getPriceStats(whereClause, params),
+        this.getDiscountStats(whereClause, params),
+        this.getRatingStats(whereClause, params)
       ])
 
       return {
@@ -42,7 +48,12 @@ export class FacetService {
         features: Array.isArray(features) ? features : [],
         shippingOptions: Array.isArray(shippingOptions) ? shippingOptions : [],
         appliedFilters: this.getAppliedFilters(filters),
-        totalProducts: await this.getTotalProductCount(whereClause, params)
+        totalProducts: await this.getTotalProductCount(whereClause, params),
+        stats: {
+          priceStats,
+          discountStats,
+          ratingStats
+        }
       }
     } catch (error) {
       console.error('Error getting facets:', error)
@@ -675,4 +686,64 @@ export class FacetService {
       throw error
     }
   }
+    /**
+   * Obtener estadísticas de precios para facets_stats
+   */
+  static async getPriceStats(whereClause, params) {
+    const sql = `
+      SELECT 
+        MIN(p.sales_price) as min_price,
+        MAX(p.sales_price) as max_price,
+        AVG(p.sales_price) as avg_price,
+        SUM(p.sales_price) as sum_price,
+        COUNT(*) as total_count
+      FROM products p
+      ${whereClause}
+      AND p.sales_price > 0
+    `
+    
+    const [result] = await executeQuery(sql, params)
+    return result || { min_price: 0, max_price: 0, avg_price: 0, sum_price: 0, total_count: 0 }
+  }
+
+  /**
+   * Obtener estadísticas de descuentos para facets_stats
+   */
+  static async getDiscountStats(whereClause, params) {
+    const sql = `
+      SELECT 
+        MIN(p.percentage_discount) as min_discount,
+        MAX(p.percentage_discount) as max_discount,
+        AVG(p.percentage_discount) as avg_discount,
+        SUM(p.percentage_discount) as sum_discount,
+        COUNT(*) as total_count
+      FROM products p
+      ${whereClause}
+      AND p.percentage_discount >= 0
+    `
+    
+    const [result] = await executeQuery(sql, params)
+    return result || { min_discount: 0, max_discount: 0, avg_discount: 0, sum_discount: 0, total_count: 0 }
+  }
+
+  /**
+   * Obtener estadísticas de ratings para facets_stats
+   */
+  static async getRatingStats(whereClause, params) {
+    const sql = `
+      SELECT 
+        MIN(p.review_rating) as min_rating,
+        MAX(p.review_rating) as max_rating,
+        AVG(p.review_rating) as avg_rating,
+        SUM(p.review_rating) as sum_rating,
+        COUNT(*) as total_count
+      FROM products p
+      ${whereClause}
+      AND p.review_rating IS NOT NULL
+    `
+    
+    const [result] = await executeQuery(sql, params)
+    return result || { min_rating: 0, max_rating: 0, avg_rating: 0, sum_rating: 0, total_count: 0 }
+  }
+
 }

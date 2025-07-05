@@ -1,4 +1,4 @@
-// src/routes/algolia.js
+// src/routes/algolia.js - COMPLETO CON FACETS_STATS
 import express from 'express'
 import { FacetService } from '../services/facetService.js'
 import { SearchService } from '../services/searchService.js'
@@ -89,6 +89,7 @@ async function processFacetOnlyRequest(algoliaParams) {
   const filters = extractFiltersFromAlgolia(algoliaParams)
   
   let facets = {}
+  let facets_stats = {}
   let nbHits = 0
   
   // Si hay facets solicitadas, obtenerlas
@@ -96,6 +97,7 @@ async function processFacetOnlyRequest(algoliaParams) {
     try {
       const facetResults = await FacetService.getFacets('', filters)
       facets = convertFacetsToAlgoliaFormat(facetResults, algoliaParams.facets)
+      facets_stats = calculateFacetStats(facetResults, algoliaParams.facets)
       
       // Estimar total de hits para facetas
       if (Object.keys(facets).length > 0) {
@@ -116,7 +118,7 @@ async function processFacetOnlyRequest(algoliaParams) {
     nbPages: 0,
     hitsPerPage: 0,
     facets,
-    facets_stats: calculateFacetStats(facets),
+    facets_stats,
     exhaustiveFacetsCount: true,
     exhaustiveNbHits: true,
     exhaustiveTypo: true,
@@ -182,9 +184,9 @@ function parseAlgoliaParams(paramsString) {
  */
 function convertAlgoliaToOurFormat(algoliaParams) {
   const filters = extractFiltersFromAlgolia(algoliaParams)
-
+  
+  // 🔍 LOG TEMPORAL PARA DEBUG
   console.log('🔧 Filters being passed to SearchService:', filters);
-
   
   return {
     query: algoliaParams.query || '',
@@ -208,10 +210,10 @@ function extractFiltersFromAlgolia(algoliaParams) {
   // Procesar facetFilters de Algolia
   algoliaParams.facetFilters.forEach(filterGroup => {
     if (Array.isArray(filterGroup)) {
-      // OR group - tomar el primero por simplicidad
-      if (filterGroup.length > 0) {
-        parseFilter(filterGroup[0], filters)
-      }
+      // OR group - procesar cada uno del grupo
+      filterGroup.forEach(filter => {
+        parseFilter(filter, filters)
+      })
     } else {
       // Filtro simple
       parseFilter(filterGroup, filters)
@@ -229,7 +231,8 @@ function parseFilter(filterString, filters) {
   
   // Manejar diferentes formatos de filtros
   if (filterString.includes(':')) {
-    const [key, value] = filterString.split(':')
+    const [key, ...valueParts] = filterString.split(':')
+    const value = valueParts.join(':') // Rejoin in case value contains ':'
     
     switch (key) {
       case 'hirerarchical_category.lvl0':
@@ -261,7 +264,7 @@ function parseFilter(filterString, filters) {
  * Convertir resultado a formato Algolia
  */
 function convertToAlgoliaFormat(searchResults, algoliaParams) {
-  // 🔍 DEBUGGING TEMPORAL - Agregar estos logs
+  // 🔍 DEBUGGING TEMPORAL
   console.log('🔍 DEBUG - SearchResults facets:', searchResults.facets);
   console.log('🔍 DEBUG - Requested facets:', algoliaParams.facets);
   if (searchResults.facets) {
@@ -269,14 +272,6 @@ function convertToAlgoliaFormat(searchResults, algoliaParams) {
   }
 
   const hits = searchResults.products.map(product => {
-    // DEBUGGING: Log the category values to see what we're getting
-    console.log(`Product ${product.id} categories:`, {
-      category_lvl0: product.category_lvl0,
-      category_lvl1: product.category_lvl1, 
-      category_lvl2: product.category_lvl2,
-      category_path: product.category_path
-    });
-
     // Parse category path if individual levels are missing
     let lvl0 = product.category_lvl0;
     let lvl1 = product.category_lvl1;
@@ -322,7 +317,6 @@ function convertToAlgoliaFormat(searchResults, algoliaParams) {
       categories: {
         [product.category_id]: product.category_name
       },
-      // FIXED: Better handling of hierarchical categories
       hirerarchical_category: {
         lvl0: lvl0 ? [lvl0] : [],
         lvl1: lvl1 ? [lvl1] : [],
@@ -343,9 +337,12 @@ function convertToAlgoliaFormat(searchResults, algoliaParams) {
   
   const totalPages = Math.ceil(searchResults.pagination.total / algoliaParams.hitsPerPage);
   
-  // 🔍 DEBUGGING TEMPORAL - Log de conversión de facetas
+  // Convertir facetas y calcular estadísticas
   const convertedFacets = searchResults.facets ? convertFacetsToAlgoliaFormat(searchResults.facets, algoliaParams.facets) : {};
+  const facets_stats = searchResults.facets ? calculateFacetStats(searchResults.facets, algoliaParams.facets) : {};
+  
   console.log('🔍 DEBUG - Converted facets:', convertedFacets);
+  console.log('📊 DEBUG - Facets stats:', facets_stats);
   
   return {
     hits,
@@ -354,7 +351,7 @@ function convertToAlgoliaFormat(searchResults, algoliaParams) {
     nbPages: totalPages,
     hitsPerPage: algoliaParams.hitsPerPage,
     facets: convertedFacets,
-    facets_stats: searchResults.facets ? calculateFacetStats(searchResults.facets) : {},
+    facets_stats: facets_stats,
     exhaustiveFacetsCount: true,
     exhaustiveNbHits: true,
     exhaustiveTypo: true,
@@ -374,6 +371,9 @@ function convertToAlgoliaFormat(searchResults, algoliaParams) {
   }
 }
 
+/**
+ * Convertir facetas a formato Algolia
+ */
 function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
   console.log('🔄 convertFacetsToAlgoliaFormat called with:');
   console.log('  - facets:', facets);
@@ -391,7 +391,6 @@ function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
     
     switch (facetName) {
       case 'brand':
-        // FIX: Use 'brands' (plural) from your FacetService
         if (facets.brands) {
           algoliaFacets.brand = {}
           facets.brands.forEach(item => {
@@ -401,7 +400,6 @@ function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
         break
         
       case 'fulfillment':
-        // FIX: Use 'fulfillmentTypes' from your FacetService
         if (facets.fulfillmentTypes) {
           algoliaFacets.fulfillment = {}
           facets.fulfillmentTypes.forEach(item => {
@@ -411,14 +409,12 @@ function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
         break
         
       case 'has_free_shipping':
-        // FIX: Extract from shippingOptions
         if (facets.shippingOptions) {
           algoliaFacets.has_free_shipping = {}
           facets.shippingOptions.forEach(item => {
             if (item.value === 'Envío Gratis') {
               algoliaFacets.has_free_shipping['true'] = parseInt(item.count);
             } else {
-              // Sum all non-free shipping options
               algoliaFacets.has_free_shipping['false'] = (algoliaFacets.has_free_shipping['false'] || 0) + parseInt(item.count);
             }
           });
@@ -426,7 +422,6 @@ function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
         break
         
       case 'hirerarchical_category.lvl0':
-        // FIX: Extract from categories
         if (facets.categories) {
           algoliaFacets['hirerarchical_category.lvl0'] = {}
           facets.categories.forEach(item => {
@@ -436,17 +431,14 @@ function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
         break
         
       case 'hirerarchical_category.lvl1':
-        // This might need to be generated or come from a different source
         algoliaFacets['hirerarchical_category.lvl1'] = {}
         break
         
       case 'hirerarchical_category.lvl2':
-        // This might need to be generated or come from a different source
         algoliaFacets['hirerarchical_category.lvl2'] = {}
         break
         
       case 'review_rating':
-        // FIX: Use 'ratings' from your FacetService
         if (facets.ratings) {
           algoliaFacets.review_rating = {}
           facets.ratings.forEach(item => {
@@ -456,19 +448,25 @@ function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
         break
         
       case 'sale_price':
-        // FIX: Use 'priceRanges' from your FacetService
         if (facets.priceRanges) {
           algoliaFacets.sale_price = {}
           facets.priceRanges.forEach(item => {
-            // Use the min value as key
             algoliaFacets.sale_price[`${item.min}.0`] = parseInt(item.count);
           });
         }
         break
         
       case 'percent_off':
-        // This would need to be added to your FacetService if you want discount ranges
         algoliaFacets.percent_off = {}
+        break
+        
+      case 'sellers.id':
+        if (facets.stores) {
+          algoliaFacets['sellers.id'] = {}
+          facets.stores.forEach(item => {
+            algoliaFacets['sellers.id'][item.id.toString()] = parseInt(item.count);
+          });
+        }
         break
         
       default:
@@ -481,26 +479,49 @@ function convertFacetsToAlgoliaFormat(facets, requestedFacets) {
 }
 
 /**
- * Calcular estadísticas de facetas
+ * Calcular estadísticas de facetas - VERSIÓN COMPLETA CON FACETS_STATS
  */
-function calculateFacetStats(facets) {
+function calculateFacetStats(facets, requestedFacets) {
+  console.log('📊 Calculating facet stats for:', facets);
+  
   const stats = {}
   
-  Object.keys(facets).forEach(facetName => {
-    const facetData = facets[facetName]
-    if (typeof facetData === 'object') {
-      const values = Object.values(facetData).filter(val => typeof val === 'number')
-      if (values.length > 0) {
-        stats[facetName] = {
-          min: Math.min(...values),
-          max: Math.max(...values),
-          avg: values.reduce((sum, val) => sum + val, 0) / values.length,
-          sum: values.reduce((sum, val) => sum + val, 0)
-        }
+  // Calcular estadísticas usando los datos directos del FacetService
+  if (facets.stats) {
+    const { priceStats, discountStats, ratingStats } = facets.stats
+    
+    // Stats de precios
+    if (priceStats && priceStats.total_count > 0) {
+      stats.sale_price = {
+        min: parseFloat(priceStats.min_price),
+        max: parseFloat(priceStats.max_price),
+        avg: Math.round(parseFloat(priceStats.avg_price) * 1000) / 1000,
+        sum: Math.round(parseFloat(priceStats.sum_price) * 1000) / 1000
       }
     }
-  })
+    
+    // Stats de descuentos
+    if (discountStats && discountStats.total_count > 0) {
+      stats.percent_off = {
+        min: parseInt(discountStats.min_discount),
+        max: parseInt(discountStats.max_discount),
+        avg: Math.round(parseFloat(discountStats.avg_discount) * 1000) / 1000,
+        sum: Math.round(parseFloat(discountStats.sum_discount) * 1000) / 1000
+      }
+    }
+    
+    // Stats de ratings
+    if (ratingStats && ratingStats.total_count > 0) {
+      stats.review_rating = {
+        min: parseFloat(ratingStats.min_rating),
+        max: parseFloat(ratingStats.max_rating),
+        avg: Math.round(parseFloat(ratingStats.avg_rating) * 1000) / 1000,
+        sum: Math.round(parseFloat(ratingStats.sum_rating) * 1000) / 1000
+      }
+    }
+  }
   
+  console.log('📊 Final facet stats:', stats);
   return stats
 }
 
