@@ -343,7 +343,16 @@ function parseFilter (filterString, filters) {
         filters.brand = value
         break
       case 'fulfillment':
-        filters.fulfillment_type = value === 'true' ? 'fulfillment' : 'seller'
+        // 🔥 CORRECCIÓN PRINCIPAL: Mapear correctamente el fulfillment
+        if (value === 'true') {
+          filters.fulfillment_type = 'fulfillment'
+        } else if (value === 'false') {
+          filters.fulfillment_type = 'seller'
+        } else {
+          // Si viene un valor específico, usarlo directamente
+          filters.fulfillment_type = value
+        }
+        console.log('  ✅ Set fulfillment_type:', filters.fulfillment_type)
         break
       case 'has_free_shipping':
         filters.free_shipping = value === 'true'

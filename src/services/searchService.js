@@ -259,6 +259,12 @@ export class SearchService {
       queryParams.push(filters.category_lvl2)
     }
 
+    if (filters.fulfillment_type) {
+      conditions.push('p.fulfillment_type = ?')
+      queryParams.push(filters.fulfillment_type)
+      console.log('  - Added fulfillment_type filter:', filters.fulfillment_type)
+    }
+
     // Filtro por rango de precios
     if (filters.min_price) {
       conditions.push('p.sales_price >= ?')
