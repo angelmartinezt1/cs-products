@@ -72,8 +72,8 @@ async function processAlgoliaRequest (request) {
     return await processFacetOnlyRequest(algoliaParams)
   }
 
-  // Convertir parámetros de Algolia a nuestro formato
-  const searchParams = convertAlgoliaToOurFormat(algoliaParams)
+  // Convertir parámetros de Algolia a nuestro formato CON SORTING
+  const searchParams = convertAlgoliaToOurFormat(algoliaParams, indexName) // 👈 AGREGAR indexName
 
   // Ejecutar búsqueda
   const searchResults = await SearchService.searchProducts(searchParams)
@@ -182,23 +182,118 @@ function parseAlgoliaParams (paramsString) {
 /**
  * Convertir parámetros de Algolia a nuestro formato
  */
-function convertAlgoliaToOurFormat (algoliaParams) {
+function convertAlgoliaToOurFormat (algoliaParams, indexName) {
   const filters = extractFiltersFromAlgolia(algoliaParams)
 
+  // 🆕 DETERMINAR SORTING BASADO EN INDEX NAME
+  const { sortBy, sortOrder } = determineSortingFromIndex(indexName)
+
   // 🔍 LOG TEMPORAL PARA DEBUG
+  console.log('🔧 Index Name:', indexName)
+  console.log('🔧 Determined sortBy:', sortBy, 'sortOrder:', sortOrder)
   console.log('🔧 Filters being passed to SearchService:', filters)
 
   return {
     query: algoliaParams.query || '',
     page: algoliaParams.page + 1, // Algolia usa base 0, nosotros base 1
     limit: algoliaParams.hitsPerPage || 20,
-    sortBy: 'relevance',
-    sortOrder: 'desc',
+    sortBy, // 👈 USAR EL SORTING DETERMINADO
+    sortOrder, // 👈 USAR EL ORDEN DETERMINADO
     facets: algoliaParams.facets && algoliaParams.facets.length > 0,
     filters
   }
 }
 
+/**
+ * 🆕 NUEVA FUNCIÓN: Determinar sorting basado en el indexName de Algolia
+ */
+function determineSortingFromIndex (indexName) {
+  if (!indexName) {
+    return { sortBy: 'relevance', sortOrder: 'desc' }
+  }
+
+  // Mapeo de index names a configuración de sorting
+  const sortingMap = {
+    // Ordenamiento por precio
+    claroshop_price_asc: { sortBy: 'price', sortOrder: 'asc' },
+    claroshop_price_desc: { sortBy: 'price', sortOrder: 'desc' },
+    sears_price_asc: { sortBy: 'price', sortOrder: 'asc' },
+    sears_price_desc: { sortBy: 'price', sortOrder: 'desc' },
+
+    // Ordenamiento por rating
+    claroshop_rating_desc: { sortBy: 'rating', sortOrder: 'desc' },
+    claroshop_rating_asc: { sortBy: 'rating', sortOrder: 'asc' },
+    sears_rating_desc: { sortBy: 'rating', sortOrder: 'desc' },
+    sears_rating_asc: { sortBy: 'rating', sortOrder: 'asc' },
+
+    // Ordenamiento por fecha (más recientes)
+    claroshop_newest: { sortBy: 'newest', sortOrder: 'desc' },
+    sears_newest: { sortBy: 'newest', sortOrder: 'desc' },
+
+    // Ordenamiento por nombre
+    claroshop_name_asc: { sortBy: 'name', sortOrder: 'asc' },
+    claroshop_name_desc: { sortBy: 'name', sortOrder: 'desc' },
+    sears_name_asc: { sortBy: 'name', sortOrder: 'asc' },
+    sears_name_desc: { sortBy: 'name', sortOrder: 'desc' },
+
+    // Ordenamiento por descuento
+    claroshop_discount_desc: { sortBy: 'discount', sortOrder: 'desc' },
+    sears_discount_desc: { sortBy: 'discount', sortOrder: 'desc' },
+
+    // Índices por defecto (relevancia)
+    claroshop: { sortBy: 'relevance', sortOrder: 'desc' },
+    sears: { sortBy: 'relevance', sortOrder: 'desc' }
+  }
+
+  // Buscar configuración exacta
+  if (sortingMap[indexName]) {
+    console.log(`✅ Found exact match for index: ${indexName}`)
+    return sortingMap[indexName]
+  }
+
+  // 🔍 FALLBACK: Analizar el nombre del índice para extraer sorting
+  const lowerIndexName = indexName.toLowerCase()
+
+  if (lowerIndexName.includes('price')) {
+    if (lowerIndexName.includes('asc')) {
+      console.log(`🔄 Fallback: Detected price_asc from ${indexName}`)
+      return { sortBy: 'price', sortOrder: 'asc' }
+    } else if (lowerIndexName.includes('desc')) {
+      console.log(`🔄 Fallback: Detected price_desc from ${indexName}`)
+      return { sortBy: 'price', sortOrder: 'desc' }
+    }
+    // Default para price sin especificar orden
+    return { sortBy: 'price', sortOrder: 'asc' }
+  }
+
+  if (lowerIndexName.includes('rating')) {
+    if (lowerIndexName.includes('asc')) {
+      return { sortBy: 'rating', sortOrder: 'asc' }
+    } else {
+      return { sortBy: 'rating', sortOrder: 'desc' } // Default para rating
+    }
+  }
+
+  if (lowerIndexName.includes('newest') || lowerIndexName.includes('recent')) {
+    return { sortBy: 'newest', sortOrder: 'desc' }
+  }
+
+  if (lowerIndexName.includes('name')) {
+    if (lowerIndexName.includes('desc')) {
+      return { sortBy: 'name', sortOrder: 'desc' }
+    } else {
+      return { sortBy: 'name', sortOrder: 'asc' } // Default para name
+    }
+  }
+
+  if (lowerIndexName.includes('discount')) {
+    return { sortBy: 'discount', sortOrder: 'desc' }
+  }
+
+  // Default final
+  console.log(`⚠️  No sorting match found for ${indexName}, using relevance`)
+  return { sortBy: 'relevance', sortOrder: 'desc' }
+}
 /**
  * Extraer filtros de los parámetros de Algolia
  */

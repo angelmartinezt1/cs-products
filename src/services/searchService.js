@@ -3,11 +3,10 @@ import { executeQuery } from '../config/database.js'
 import { FacetService } from './facetService.js'; // Add this import
 
 export class SearchService {
-  
   /**
    * Búsqueda principal de productos con facetas integradas
    */
-  static async searchProductsWithFacets(params) {
+  static async searchProductsWithFacets (params) {
     const {
       query = '',
       page = 1,
@@ -55,7 +54,7 @@ export class SearchService {
   /**
    * Búsqueda principal de productos (método actualizado)
    */
-  static async searchProducts(params) {
+  static async searchProducts (params) {
     const {
       query = '',
       page = 1,
@@ -67,11 +66,11 @@ export class SearchService {
     } = params
 
     const offset = (page - 1) * limit
-    
+
     try {
       // Construir la consulta base
       const { sql, countSql, queryParams } = this.buildSearchQuery(query, filters, sortBy, sortOrder, limit, offset)
-      
+
       // Ejecutar búsqueda y conteo en paralelo
       const [products, totalResults, facetResults] = await Promise.all([
         executeQuery(sql, queryParams),
@@ -91,7 +90,7 @@ export class SearchService {
           totalPages: Math.ceil((totalResults[0]?.total || 0) / limit)
         },
         facets: facetResults,
-        query: query,
+        query,
         filters: this.normalizeFilters(filters),
         meta: {
           executionTime: Date.now(),
@@ -107,7 +106,7 @@ export class SearchService {
   /**
    * Construye la consulta SQL de búsqueda
    */
-  static buildSearchQuery(query, filters, sortBy, sortOrder, limit, offset) {
+  static buildSearchQuery (query, filters, sortBy, sortOrder, limit, offset) {
     let sql = `
       SELECT 
         p.id,
@@ -149,10 +148,10 @@ export class SearchService {
         AND p.store_authorized = 1
         AND p.stock > 0
     `
-  
+
     const queryParams = []
     const whereConditions = []
-  
+
     // Búsqueda por texto con diferentes estrategias
     if (query && query.trim()) {
       const searchStrategy = this.determineSearchStrategy(query)
@@ -160,33 +159,33 @@ export class SearchService {
       whereConditions.push(searchCondition.condition)
       queryParams.push(...searchCondition.params)
     }
-  
+
     // Aplicar filtros
     const filterConditions = this.buildFilterConditions(filters, queryParams)
     whereConditions.push(...filterConditions)
-  
+
     // Agregar condiciones WHERE
     if (whereConditions.length > 0) {
       sql += ` AND (${whereConditions.join(' AND ')})`
     }
-  
+
     // SQL para conteo (sin ORDER BY ni LIMIT)
     const countSql = sql.replace(/SELECT[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM')
-  
+
     // Ordenamiento
     sql += this.buildOrderBy(sortBy, sortOrder, query)
-  
+
     // Paginación
-    sql += ` LIMIT ? OFFSET ?`
+    sql += ' LIMIT ? OFFSET ?'
     queryParams.push(limit, offset)
-  
+
     return { sql, countSql, queryParams }
   }
 
   /**
    * Obtener facetas para búsqueda - FIXED METHOD
    */
-  static async getFacetsForSearch(query, filters, mode) {
+  static async getFacetsForSearch (query, filters, mode) {
     try {
       if (mode === 'cached' && !query && Object.keys(filters).length === 0) {
         // Usar FacetService para facetas rápidas
@@ -204,7 +203,7 @@ export class SearchService {
   /**
    * Determinar estrategia de búsqueda basada en el query
    */
-  static determineSearchStrategy(query) {
+  static determineSearchStrategy (query) {
     // Implementar lógica para determinar si es búsqueda exacta, fuzzy, etc.
     if (query.includes('"')) return 'exact'
     if (query.length < 3) return 'prefix'
@@ -214,25 +213,25 @@ export class SearchService {
   /**
    * Construir condición de búsqueda de texto
    */
-  static buildTextSearchCondition(query, strategy) {
+  static buildTextSearchCondition (query, strategy) {
     const searchTerms = query.trim().split(/\s+/)
-    
+
     switch (strategy) {
       case 'exact':
         const exactQuery = query.replace(/"/g, '')
         return {
-          condition: `(p.name LIKE ? OR p.brand LIKE ? OR p.description LIKE ?)`,
+          condition: '(p.name LIKE ? OR p.brand LIKE ? OR p.description LIKE ?)',
           params: [`%${exactQuery}%`, `%${exactQuery}%`, `%${exactQuery}%`]
         }
-        
+
       case 'prefix':
         return {
-          condition: `(p.name LIKE ? OR p.brand LIKE ?)`,
+          condition: '(p.name LIKE ? OR p.brand LIKE ?)',
           params: [`${query}%`, `${query}%`]
         }
-        
+
       default: // fulltext
-        const conditions = searchTerms.map(() => `(p.name LIKE ? OR p.brand LIKE ? OR p.description LIKE ?)`).join(' AND ')
+        const conditions = searchTerms.map(() => '(p.name LIKE ? OR p.brand LIKE ? OR p.description LIKE ?)').join(' AND ')
         const params = searchTerms.flatMap(term => [`%${term}%`, `%${term}%`, `%${term}%`])
         return { condition: conditions, params }
     }
@@ -241,7 +240,7 @@ export class SearchService {
   /**
    * Construir condiciones de filtros
    */
-  static buildFilterConditions(filters, queryParams) {
+  static buildFilterConditions (filters, queryParams) {
     const conditions = []
 
     // Filtro por categoría (con diferentes niveles)
@@ -249,12 +248,12 @@ export class SearchService {
       conditions.push('p.category_lvl0 = ?')
       queryParams.push(filters.category_lvl0)
     }
-    
+
     if (filters.category_lvl1) {
       conditions.push('p.category_lvl1 = ?')
       queryParams.push(filters.category_lvl1)
     }
-    
+
     if (filters.category_lvl2) {
       conditions.push('p.category_lvl2 = ?')
       queryParams.push(filters.category_lvl2)
@@ -265,7 +264,7 @@ export class SearchService {
       conditions.push('p.sales_price >= ?')
       queryParams.push(parseFloat(filters.min_price))
     }
-    
+
     if (filters.max_price) {
       conditions.push('p.sales_price <= ?')
       queryParams.push(parseFloat(filters.max_price))
@@ -318,9 +317,9 @@ export class SearchService {
   /**
    * Construir cláusula ORDER BY
    */
-  static buildOrderBy(sortBy, sortOrder, query) {
+  static buildOrderBy (sortBy, sortOrder, query) {
     const direction = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
-    
+
     switch (sortBy) {
       case 'price':
         return ` ORDER BY p.sales_price ${direction}`
@@ -330,6 +329,10 @@ export class SearchService {
         return ` ORDER BY p.created_at ${direction}`
       case 'name':
         return ` ORDER BY p.name ${direction}`
+      case 'discount': // 🆕 NUEVO SORTING POR DESCUENTO
+        return ` ORDER BY p.percentage_discount ${direction}, p.sales_price ASC`
+      case 'reviews': // 🆕 SORTING POR CANTIDAD DE REVIEWS
+        return ` ORDER BY p.total_reviews ${direction}, p.review_rating DESC`
       case 'relevance':
       default:
         // Si hay query de búsqueda, ordenar por relevancia primero
@@ -343,7 +346,7 @@ export class SearchService {
   /**
    * Obtener conteo de resultados
    */
-  static async getSearchCount(countSql, params) {
+  static async getSearchCount (countSql, params) {
     try {
       const result = await executeQuery(countSql, params)
       return result
@@ -356,12 +359,12 @@ export class SearchService {
   /**
    * Enriquecer productos con datos adicionales
    */
-  static async enrichProducts(products) {
+  static async enrichProducts (products) {
     if (!products || products.length === 0) return []
 
     try {
       const productIds = products.map(p => p.id)
-      
+
       // Obtener imágenes, variaciones y atributos en paralelo
       const [images, variations, attributes] = await Promise.all([
         this.getProductImages(productIds),
@@ -396,9 +399,9 @@ export class SearchService {
   /**
    * Obtener imágenes de productos
    */
-  static async getProductImages(productIds) {
+  static async getProductImages (productIds) {
     if (!productIds.length) return []
-    
+
     const placeholders = productIds.map(() => '?').join(',')
     const sql = `
       SELECT 
@@ -410,16 +413,16 @@ export class SearchService {
       WHERE product_id IN (${placeholders})
       ORDER BY product_id, image_order
     `
-    
+
     return await executeQuery(sql, productIds)
   }
 
   /**
    * Obtener variaciones de productos
    */
-  static async getProductVariations(productIds) {
+  static async getProductVariations (productIds) {
     if (!productIds.length) return []
-    
+
     const placeholders = productIds.map(() => '?').join(',')
     const sql = `
       SELECT 
@@ -439,16 +442,16 @@ export class SearchService {
       WHERE product_id IN (${placeholders})
       GROUP BY product_id
     `
-    
+
     return await executeQuery(sql, productIds)
   }
 
   /**
    * Obtener atributos de productos
    */
-  static async getProductAttributes(productIds) {
+  static async getProductAttributes (productIds) {
     if (!productIds.length) return []
-    
+
     const placeholders = productIds.map(() => '?').join(',')
     const sql = `
       SELECT 
@@ -459,29 +462,29 @@ export class SearchService {
       WHERE product_id IN (${placeholders})
       ORDER BY product_id, attribute_name
     `
-    
+
     return await executeQuery(sql, productIds)
   }
 
   /**
    * Normalizar filtros
    */
-  static normalizeFilters(filters) {
+  static normalizeFilters (filters) {
     const normalized = {}
-    
+
     Object.keys(filters).forEach(key => {
       if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
         normalized[key] = filters[key]
       }
     })
-    
+
     return normalized
   }
 
   /**
    * Agrupar array por clave
    */
-  static groupBy(array, key) {
+  static groupBy (array, key) {
     return array.reduce((groups, item) => {
       const group = groups[item[key]] || []
       group.push(item)
@@ -493,7 +496,7 @@ export class SearchService {
   /**
    * Búsqueda simple (mantener compatibilidad)
    */
-  static async simpleSearch(query = '', page = 1, limit = 20, filters = {}) {
+  static async simpleSearch (query = '', page = 1, limit = 20, filters = {}) {
     try {
       const results = await this.searchProducts({
         query,
@@ -502,7 +505,7 @@ export class SearchService {
         filters,
         facets: false
       })
-      
+
       return {
         products: results.products,
         total: results.pagination.total,
@@ -518,12 +521,12 @@ export class SearchService {
   /**
    * Autocompletado de búsquedas
    */
-  static async getAutocompleteSuggestions(query, limit = 10) {
+  static async getAutocompleteSuggestions (query, limit = 10) {
     if (!query || query.length < 2) return []
 
     try {
       const likeQuery = `${query}%`
-      
+
       const sql = `
         (SELECT DISTINCT name as suggestion, 'product' as type, 1 as priority
          FROM products 
@@ -542,14 +545,14 @@ export class SearchService {
         ORDER BY priority, suggestion
         LIMIT ?
       `
-      
+
       const suggestions = await executeQuery(sql, [
         likeQuery, Math.ceil(limit / 3),
         likeQuery, Math.ceil(limit / 3),
         likeQuery, Math.ceil(limit / 3),
         limit
       ])
-      
+
       return suggestions
     } catch (error) {
       console.error('Autocomplete error:', error)
