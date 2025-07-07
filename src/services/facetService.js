@@ -2,20 +2,20 @@
 import { executeQuery } from '../config/database.js'
 
 export class FacetService {
-  
   /**
    * Obtiene todas las facetas disponibles con conteos dinámicos
    */
-  static async getFacets(searchQuery = '', filters = {}, categoryId = null) {
+  static async getFacets (searchQuery = '', filters = {}, categoryId = null) {
     try {
       const whereClause = this.buildWhereClause(searchQuery, filters, categoryId)
       const params = this.buildQueryParams(searchQuery, filters, categoryId)
-      
+
       // Ejecutar todas las consultas de facetas en paralelo
       const [
         brands,
         categories,
         priceRanges,
+        discounts,
         stores,
         fulfillmentTypes,
         ratings,
@@ -28,6 +28,7 @@ export class FacetService {
         this.getBrandFacets(whereClause, params, filters),
         this.getCategoryFacets(whereClause, params, filters, categoryId),
         this.getPriceRangeFacets(whereClause, params, filters),
+        this.getDiscountFacets(whereClause, params, filters),
         this.getStoreFacets(whereClause, params, filters),
         this.getFulfillmentFacets(whereClause, params, filters),
         this.getRatingFacets(whereClause, params, filters),
@@ -42,6 +43,7 @@ export class FacetService {
         brands: Array.isArray(brands) ? brands : [],
         categories: Array.isArray(categories) ? categories : [],
         priceRanges: Array.isArray(priceRanges) ? priceRanges : [],
+        discounts: Array.isArray(discounts) ? discounts : [],
         stores: Array.isArray(stores) ? stores : [],
         fulfillmentTypes: Array.isArray(fulfillmentTypes) ? fulfillmentTypes : [],
         ratings: Array.isArray(ratings) ? ratings : [],
@@ -64,7 +66,7 @@ export class FacetService {
   /**
    * Construye la cláusula WHERE base para facetas - CORREGIDO
    */
-  static buildWhereClause(searchQuery, filters, categoryId) {
+  static buildWhereClause (searchQuery, filters, categoryId) {
     let whereClause = `
       WHERE p.status = 1 
         AND p.visible = 1 
@@ -72,7 +74,7 @@ export class FacetService {
         AND p.stock > 0
     `
 
-    console.log('🔧 FacetService buildWhereClause called with filters:', filters);
+    console.log('🔧 FacetService buildWhereClause called with filters:', filters)
 
     // Búsqueda por texto
     if (searchQuery && searchQuery.trim()) {
@@ -85,7 +87,7 @@ export class FacetService {
 
     // Filtro por categoría específica (del parámetro categoryId)
     if (categoryId) {
-      whereClause += ` AND p.category_id = ?`
+      whereClause += ' AND p.category_id = ?'
     }
 
     // CORREGIDO: Aplicar otros filtros usando buildFilterConditions
@@ -94,14 +96,14 @@ export class FacetService {
       whereClause += ` AND (${filterConditions.join(' AND ')})`
     }
 
-    console.log('  - Final whereClause:', whereClause);
+    console.log('  - Final whereClause:', whereClause)
     return whereClause
   }
 
   /**
    * Construye los parámetros para las consultas - CORREGIDO
    */
-  static buildQueryParams(searchQuery, filters, categoryId) {
+  static buildQueryParams (searchQuery, filters, categoryId) {
     const params = []
 
     // Parámetros de búsqueda por texto
@@ -119,14 +121,14 @@ export class FacetService {
     const filterParams = this.getFilterParams(filters)
     params.push(...filterParams)
 
-    console.log('  - Final query params:', params);
+    console.log('  - Final query params:', params)
     return params
   }
 
   /**
    * Facetas de marcas
    */
-  static async getBrandFacets(whereClause, params, filters) {
+  static async getBrandFacets (whereClause, params, filters) {
     if (filters.brand) return [] // No mostrar si ya está filtrado
 
     const sql = `
@@ -144,7 +146,7 @@ export class FacetService {
       ORDER BY count DESC, avg_rating DESC
       LIMIT 30
     `
-    
+
     const results = await executeQuery(sql, params)
     return results.map(row => ({
       value: row.value,
@@ -160,7 +162,7 @@ export class FacetService {
   /**
    * Facetas de categorías jerárquicas (CORREGIDO)
    */
-  static async getCategoryFacets(whereClause, params, filters, currentCategoryId) {
+  static async getCategoryFacets (whereClause, params, filters, currentCategoryId) {
     // Si no estamos en una categoría específica, mostrar nivel 0
     if (!currentCategoryId) {
       const sql = `
@@ -198,7 +200,7 @@ export class FacetService {
   /**
    * Facetas de rangos de precio dinámicos
    */
-  static async getPriceRangeFacets(whereClause, params, filters) {
+  static async getPriceRangeFacets (whereClause, params, filters) {
     if (filters.min_price || filters.max_price) return []
 
     // Primero obtener estadísticas de precio
@@ -212,13 +214,13 @@ export class FacetService {
       ${whereClause}
       AND p.sales_price > 0
     `
-    
+
     const [stats] = await executeQuery(statsSql, params)
     if (!stats || stats.total_count === 0) return []
 
     // Generar rangos dinámicos
     const ranges = this.generatePriceRanges(stats.min_price, stats.max_price, stats.avg_price)
-    
+
     // Obtener conteos para cada rango
     const rangePromises = ranges.map(async (range) => {
       const rangeSql = `
@@ -228,10 +230,10 @@ export class FacetService {
         AND p.sales_price >= ?
         ${range.max ? 'AND p.sales_price <= ?' : ''}
       `
-      
+
       const rangeParams = [...params, range.min]
       if (range.max) rangeParams.push(range.max)
-      
+
       const [result] = await executeQuery(rangeSql, rangeParams)
       return {
         ...range,
@@ -246,7 +248,7 @@ export class FacetService {
   /**
    * Facetas de tiendas
    */
-  static async getStoreFacets(whereClause, params, filters) {
+  static async getStoreFacets (whereClause, params, filters) {
     if (filters.store_id) return []
 
     const sql = `
@@ -263,7 +265,7 @@ export class FacetService {
       ORDER BY count DESC, avg_rating DESC
       LIMIT 20
     `
-    
+
     const results = await executeQuery(sql, params)
     return results.map(row => ({
       id: row.id,
@@ -278,7 +280,7 @@ export class FacetService {
   /**
    * Facetas de fulfillment
    */
-  static async getFulfillmentFacets(whereClause, params, filters) {
+  static async getFulfillmentFacets (whereClause, params, filters) {
     if (filters.fulfillment_type) return []
 
     const sql = `
@@ -291,7 +293,7 @@ export class FacetService {
       GROUP BY p.fulfillment_type
       ORDER BY count DESC
     `
-    
+
     const results = await executeQuery(sql, params)
     return results.map(row => ({
       value: row.value,
@@ -303,7 +305,7 @@ export class FacetService {
   /**
    * Facetas de rating
    */
-  static async getRatingFacets(whereClause, params, filters) {
+  static async getRatingFacets (whereClause, params, filters) {
     const sql = `
       SELECT 
         CASE 
@@ -321,7 +323,7 @@ export class FacetService {
       GROUP BY value
       ORDER BY MIN(p.review_rating) DESC
     `
-    
+
     const results = await executeQuery(sql, params)
     return results.map(row => ({
       value: row.value,
@@ -333,7 +335,7 @@ export class FacetService {
   /**
    * Facetas de características especiales
    */
-  static async getFeatureFacets(whereClause, params, filters) {
+  static async getFeatureFacets (whereClause, params, filters) {
     const features = [
       { key: 'digital', label: 'Producto Digital' },
       { key: 'big_ticket', label: 'Producto de Alto Valor' },
@@ -349,7 +351,7 @@ export class FacetService {
         ${whereClause}
         AND p.${feature.key} = 1
       `
-      
+
       const [result] = await executeQuery(sql, params)
       return {
         key: feature.key,
@@ -365,7 +367,7 @@ export class FacetService {
   /**
    * Facetas de opciones de envío
    */
-  static async getShippingFacets(whereClause, params, filters) {
+  static async getShippingFacets (whereClause, params, filters) {
     const sql = `
       SELECT 
         CASE 
@@ -382,7 +384,7 @@ export class FacetService {
       GROUP BY value
       ORDER BY count DESC
     `
-    
+
     const results = await executeQuery(sql, params)
     return results.map(row => ({
       value: row.value,
@@ -395,9 +397,9 @@ export class FacetService {
   /**
    * Genera rangos de precio dinámicos basados en la distribución
    */
-  static generatePriceRanges(minPrice, maxPrice, avgPrice) {
+  static generatePriceRanges (minPrice, maxPrice, avgPrice) {
     const ranges = []
-    
+
     if (maxPrice <= 1000) {
       // Productos económicos
       ranges.push(
@@ -425,32 +427,32 @@ export class FacetService {
         { label: '$50,000+', min: 50000, max: null }
       )
     }
-    
+
     return ranges
   }
 
   /**
    * Construye condiciones de filtro para WHERE - CORREGIDO CON SOPORTE PARA CATEGORÍAS
    */
-  static buildFilterConditions(filters) {
+  static buildFilterConditions (filters) {
     const conditions = []
 
-    console.log('🔧 FacetService buildFilterConditions called with:', filters);
+    console.log('🔧 FacetService buildFilterConditions called with:', filters)
 
     // FILTROS DE CATEGORÍA - AGREGADOS
     if (filters.category_lvl0) {
       conditions.push('p.category_lvl0 = ?')
-      console.log('  - Added category_lvl0 filter:', filters.category_lvl0);
+      console.log('  - Added category_lvl0 filter:', filters.category_lvl0)
     }
-    
+
     if (filters.category_lvl1) {
       conditions.push('p.category_lvl1 = ?')
-      console.log('  - Added category_lvl1 filter:', filters.category_lvl1);
+      console.log('  - Added category_lvl1 filter:', filters.category_lvl1)
     }
-    
+
     if (filters.category_lvl2) {
       conditions.push('p.category_lvl2 = ?')
-      console.log('  - Added category_lvl2 filter:', filters.category_lvl2);
+      console.log('  - Added category_lvl2 filter:', filters.category_lvl2)
     }
 
     // FILTROS EXISTENTES
@@ -498,25 +500,33 @@ export class FacetService {
       conditions.push('p.percentage_discount > 0')
     }
 
-    console.log('  - Final conditions:', conditions);
+    if (filters.percentage_discount) {
+      if (Array.isArray(filters.percentage_discount)) {
+        conditions.push(`p.percentage_discount IN (${filters.percentage_discount.map(() => '?').join(',')})`)
+      } else {
+        conditions.push('p.percentage_discount = ?')
+      }
+    }
+
+    console.log('  - Final conditions:', conditions)
     return conditions
   }
 
   /**
    * Obtiene parámetros para filtros - CORREGIDO CON SOPORTE PARA CATEGORÍAS
    */
-  static getFilterParams(filters) {
+  static getFilterParams (filters) {
     const params = []
 
     // PARÁMETROS DE CATEGORÍA - AGREGADOS
     if (filters.category_lvl0) {
       params.push(filters.category_lvl0)
     }
-    
+
     if (filters.category_lvl1) {
       params.push(filters.category_lvl1)
     }
-    
+
     if (filters.category_lvl2) {
       params.push(filters.category_lvl2)
     }
@@ -543,14 +553,22 @@ export class FacetService {
     if (filters.min_rating) params.push(parseFloat(filters.min_rating))
     if (filters.fulfillment_type) params.push(filters.fulfillment_type)
 
-    console.log('  - Final params:', params);
+    if (filters.percentage_discount) {
+      if (Array.isArray(filters.percentage_discount)) {
+        params.push(...filters.percentage_discount.map(d => parseFloat(d)))
+      } else {
+        params.push(parseFloat(filters.percentage_discount))
+      }
+    }
+
+    console.log('  - Final params:', params)
     return params
   }
 
   /**
    * Obtiene filtros aplicados para mostrar en UI
    */
-  static getAppliedFilters(filters) {
+  static getAppliedFilters (filters) {
     const applied = []
 
     // FILTROS DE CATEGORÍA
@@ -579,24 +597,24 @@ export class FacetService {
     }
 
     if (filters.min_price || filters.max_price) {
-      const priceLabel = filters.min_price && filters.max_price 
+      const priceLabel = filters.min_price && filters.max_price
         ? `Precio: $${filters.min_price} - $${filters.max_price}`
-        : filters.min_price 
+        : filters.min_price
           ? `Precio: Desde $${filters.min_price}`
           : `Precio: Hasta $${filters.max_price}`
-      
-      applied.push({ 
-        type: 'price_range', 
-        value: { min: filters.min_price, max: filters.max_price }, 
-        label: priceLabel 
+
+      applied.push({
+        type: 'price_range',
+        value: { min: filters.min_price, max: filters.max_price },
+        label: priceLabel
       })
     }
 
     if (filters.min_rating) {
-      applied.push({ 
-        type: 'min_rating', 
-        value: filters.min_rating, 
-        label: `Rating: ${filters.min_rating}+ estrellas` 
+      applied.push({
+        type: 'min_rating',
+        value: filters.min_rating,
+        label: `Rating: ${filters.min_rating}+ estrellas`
       })
     }
 
@@ -605,10 +623,10 @@ export class FacetService {
     }
 
     if (filters.fulfillment_type) {
-      applied.push({ 
-        type: 'fulfillment_type', 
-        value: filters.fulfillment_type, 
-        label: `Fulfillment: ${filters.fulfillment_type}` 
+      applied.push({
+        type: 'fulfillment_type',
+        value: filters.fulfillment_type,
+        label: `Fulfillment: ${filters.fulfillment_type}`
       })
     }
 
@@ -620,13 +638,20 @@ export class FacetService {
       applied.push({ type: 'has_discount', value: true, label: 'Con Descuento' })
     }
 
+    if (filters.percentage_discount) {
+      const discounts = Array.isArray(filters.percentage_discount) ? filters.percentage_discount : [filters.percentage_discount]
+      discounts.forEach(discount => {
+        applied.push({ type: 'percentage_discount', value: discount, label: `Descuento: ${discount}%` })
+      })
+    }
+
     return applied
   }
 
   /**
    * Obtiene el conteo total de productos
    */
-  static async getTotalProductCount(whereClause, params) {
+  static async getTotalProductCount (whereClause, params) {
     const sql = `SELECT COUNT(*) as total FROM products p ${whereClause}`
     const [result] = await executeQuery(sql, params)
     return result.total
@@ -635,7 +660,7 @@ export class FacetService {
   /**
    * Actualiza las facetas pre-calculadas en segundo plano
    */
-  static async updatePreCalculatedFacets() {
+  static async updatePreCalculatedFacets () {
     try {
       await executeQuery('CALL UpdateAllFacets()')
       console.log('✅ Pre-calculated facets updated successfully')
@@ -648,7 +673,7 @@ export class FacetService {
   /**
    * Obtiene facetas rápidas desde tabla pre-calculada
    */
-  static async getQuickFacets(categoryId = null) {
+  static async getQuickFacets (categoryId = null) {
     try {
       let sql = `
         SELECT facet_type, facet_value, facet_count
@@ -656,18 +681,18 @@ export class FacetService {
         WHERE facet_count > 0
       `
       const params = []
-      
+
       if (categoryId) {
-        sql += ` AND (category_id = ? OR category_id IS NULL)`
+        sql += ' AND (category_id = ? OR category_id IS NULL)'
         params.push(categoryId)
       } else {
-        sql += ` AND category_id IS NULL`
+        sql += ' AND category_id IS NULL'
       }
-      
-      sql += ` ORDER BY facet_type, facet_count DESC`
-      
+
+      sql += ' ORDER BY facet_type, facet_count DESC'
+
       const results = await executeQuery(sql, params)
-      
+
       // Agrupar por tipo de faceta
       const facets = {}
       results.forEach(row => {
@@ -679,17 +704,18 @@ export class FacetService {
           count: row.facet_count
         })
       })
-      
+
       return facets
     } catch (error) {
       console.error('Error getting quick facets:', error)
       throw error
     }
   }
-    /**
+
+  /**
    * Obtener estadísticas de precios para facets_stats
    */
-  static async getPriceStats(whereClause, params) {
+  static async getPriceStats (whereClause, params) {
     const sql = `
       SELECT 
         MIN(p.sales_price) as min_price,
@@ -701,7 +727,7 @@ export class FacetService {
       ${whereClause}
       AND p.sales_price > 0
     `
-    
+
     const [result] = await executeQuery(sql, params)
     return result || { min_price: 0, max_price: 0, avg_price: 0, sum_price: 0, total_count: 0 }
   }
@@ -709,7 +735,7 @@ export class FacetService {
   /**
    * Obtener estadísticas de descuentos para facets_stats
    */
-  static async getDiscountStats(whereClause, params) {
+  static async getDiscountStats (whereClause, params) {
     const sql = `
       SELECT 
         MIN(p.percentage_discount) as min_discount,
@@ -721,15 +747,53 @@ export class FacetService {
       ${whereClause}
       AND p.percentage_discount >= 0
     `
-    
+
     const [result] = await executeQuery(sql, params)
     return result || { min_discount: 0, max_discount: 0, avg_discount: 0, sum_discount: 0, total_count: 0 }
+  }
+
+  static async getDiscountFacets (whereClause, params, filters) {
+    console.log('🔍 DEBUG getDiscountFacets - START')
+    console.log('  - filters.percentage_discount:', filters.percentage_discount)
+
+    if (filters.percentage_discount) {
+      console.log('  - SKIPPING: percentage_discount filter exists')
+      return []
+    }
+
+    const sql = `
+      SELECT 
+        p.percentage_discount as value,
+        COUNT(*) as count
+      FROM products p
+      ${whereClause}
+      AND p.percentage_discount > 0
+      GROUP BY p.percentage_discount
+      ORDER BY count DESC, p.percentage_discount DESC
+      LIMIT 20
+    `
+
+    console.log('  - SQL:', sql)
+    console.log('  - params:', params)
+
+    const results = await executeQuery(sql, params)
+    console.log('  - Raw results:', results)
+
+    const mapped = results.map(row => ({
+      value: row.value.toString(),
+      count: row.count
+    }))
+
+    console.log('  - Mapped results:', mapped)
+    console.log('🔍 DEBUG getDiscountFacets - END')
+
+    return mapped
   }
 
   /**
    * Obtener estadísticas de ratings para facets_stats
    */
-  static async getRatingStats(whereClause, params) {
+  static async getRatingStats (whereClause, params) {
     const sql = `
       SELECT 
         MIN(p.review_rating) as min_rating,
@@ -741,9 +805,7 @@ export class FacetService {
       ${whereClause}
       AND p.review_rating IS NOT NULL
     `
-    
     const [result] = await executeQuery(sql, params)
     return result || { min_rating: 0, max_rating: 0, avg_rating: 0, sum_rating: 0, total_count: 0 }
   }
-
 }
