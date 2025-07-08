@@ -11,17 +11,60 @@ import { searchRoutes } from './routes/search.js'
 const app = express()
 const PORT = process.env.PORT || 3005
 
-// Middlewares
+const allowedOrigins = [
+  'https://www.claroshop.com',
+  'http://localhost:3005',
+  'null' // <- ¡añade este!
+]
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3005'],
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true) // Permitir peticiones sin origin (como Postman)
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    }
+    return callback(new Error(`Origin not allowed by CORS: ${origin}`))
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-algolia-agent', 'x-algolia-api-key', 'x-algolia-application-id']
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'x-algolia-agent',
+    'x-algolia-api-key',
+    'x-algolia-application-id'
+  ]
 }))
 
+
+
+app.use((req, res, next) => {
+  console.log('--- Nueva solicitud ---')
+  console.log('Método:', req.method)
+  console.log('URL:', req.url)
+  console.log('Content-Type:', req.headers['content-type'])
+  next()
+})
+
+app.use((req, res, next) => {
+  if (
+    req.method === 'POST' &&
+    req.url.startsWith('/1/indexes/') &&
+    !req.headers['content-type']
+  ) {
+    req.headers['content-type'] = 'application/json'
+    console.warn('⚠️ Parche aplicado: Forzado Content-Type: application/json')
+  }
+  next()
+})
+
 app.use(express.json())
-app.use(express.urlencoded({ extended: true })) // Para compatibilidad con form-data de Algolia
+app.use(express.urlencoded({ extended: true }))
+
+
 app.use(requestLogger)
+
+
 
 // Health check
 app.get('/health', (req, res) => {

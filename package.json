@@ -7,7 +7,13 @@
   "scripts": {
     "dev": "node --env-file=.env --watch src/index.js",
     "sam": "sam build && sam deploy",
-    "build": "echo 'No build step needed'"
+    "build": "echo 'No build step needed'",
+    "indexer:run": "node --env-file=.env scripts/run-indexer.js",
+    "indexer:full": "node --env-file=.env scripts/run-indexer.js --update-facets --optimize-tables",
+    "indexer:quick": "node --env-file=.env scripts/run-indexer.js --pages 500",
+    "indexer:stats": "node --env-file=.env scripts/run-indexer.js --stats-only",
+    "indexer:dry-run": "node --env-file=.env scripts/run-indexer.js --pages 5 --dry-run",
+    "indexer:maintenance": "node --env-file=.env scripts/run-indexer.js --cleanup-old --update-facets --optimize-tables --stats-only"
   },
   "keywords": [],
   "author": "Juan Angel Martínez López",
@@ -15,6 +21,8 @@
     "extends": "standard"
   },
   "dependencies": {
+    "axios": "^1.10.0",
+    "commander": "^14.0.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "mysql2": "^3.14.1"
