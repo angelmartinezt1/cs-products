@@ -13,7 +13,23 @@
     "indexer:quick": "node --env-file=.env scripts/run-indexer.js --start-page 2477 --pages 5398",
     "indexer:stats": "node --env-file=.env scripts/run-indexer.js --stats-only",
     "indexer:dry-run": "node --env-file=.env scripts/run-indexer.js --pages 5 --dry-run",
-    "indexer:maintenance": "node --env-file=.env scripts/run-indexer.js --cleanup-old --update-facets --optimize-tables --stats-only"
+    "indexer:maintenance": "node --env-file=.env scripts/run-indexer.js --cleanup-old --update-facets --optimize-tables --stats-only",
+    "typesense:run": "node --env-file=.env scripts/run-typesense-indexer.js",
+    "typesense:full": "node --env-file=.env scripts/run-typesense-indexer.js --recreate-collection",
+    "typesense:quick": "node --env-file=.env scripts/run-typesense-indexer.js --pages 10 --start-page 1",
+    "typesense:stats": "node --env-file=.env scripts/run-typesense-indexer.js --stats-only",
+    "typesense:test": "node --env-file=.env scripts/run-typesense-indexer.js --test-connection",
+    "typesense:dry-run": "node --env-file=.env scripts/run-typesense-indexer.js --pages 5 --dry-run",
+    "typesense:recreate": "node --env-file=.env scripts/run-typesense-indexer.js --recreate-collection --pages 100",
+    "typesense:v2": "node --env-file=.env scripts/typesense-indexer-v2.js",
+    "typesense:v2-quick": "node --env-file=.env scripts/typesense-indexer-v2.js --pages 5",
+    "typesense:diagnostic": "node --env-file=.env scripts/typesense-diagnostic.js",
+    "typesense:existing": "node --env-file=.env scripts/typesense-indexer-existing-schema.js",
+    "typesense:existing-quick": "node --env-file=.env scripts/typesense-indexer-existing-schema.js --pages 5",
+    "typesense:checkpoint": "node --env-file=.env scripts/typesense-indexer-checkpoint.js",
+    "typesense:checkpoint-resume": "node --env-file=.env scripts/typesense-indexer-checkpoint.js --resume",
+    "typesense:checkpoint-debug": "node --env-file=.env scripts/typesense-indexer-checkpoint.js --debug-errors --pages 10",
+    "typesense:checkpoint-safe": "node --env-file=.env scripts/typesense-indexer-checkpoint.js --stop-on-errors --max-consecutive-errors 3"
   },
   "keywords": [],
   "author": "Juan Angel Martínez López",
@@ -25,7 +41,8 @@
     "commander": "^14.0.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "mysql2": "^3.14.1"
+    "mysql2": "^3.14.1",
+    "typesense": "^2.0.3"
   },
   "devDependencies": {
     "eslint": "^9.30.0",
