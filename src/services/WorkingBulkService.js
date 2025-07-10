@@ -115,7 +115,7 @@ class WorkingBulkService {
             inserted++
           }
 
-          // Procesar imágenes si existen
+          // Procesar imágenes y atributos si existen
           await this.processProductImages(product)
         } catch (productError) {
           console.warn(`⚠️ Error con producto ${product.id}: ${productError.message}`)
@@ -165,6 +165,68 @@ class WorkingBulkService {
           ])
         } catch (error) {
           // Ignorar errores de imagen individual
+        }
+      }
+    }
+
+    // ✅ NUEVO: Procesar atributos del producto
+    await this.processProductAttributes(product)
+  }
+
+  async processProductAttributes (product) {
+    if (!product.originalData?.attributes || !Array.isArray(product.originalData.attributes)) {
+      return
+    }
+
+    // Limpiar atributos existentes
+    try {
+      await this.connection.execute(
+        'DELETE FROM product_attributes WHERE product_id = ?',
+        [product.id]
+      )
+    } catch (error) {
+      // Ignorar errores de limpieza
+    }
+
+    // Insertar atributos uno por uno
+    for (const attribute of product.originalData.attributes) {
+      if (attribute.name && attribute.value) {
+        try {
+          await this.connection.execute(`
+            INSERT INTO product_attributes (product_id, attribute_name, attribute_value)
+            VALUES (?, ?, ?)
+          `, [
+            product.id,
+            attribute.name.substring(0, 100), // Limitar longitud
+            String(attribute.value).substring(0, 500) // Limitar longitud
+          ])
+        } catch (error) {
+          // Ignorar errores de atributo individual
+        }
+      }
+    }
+
+    // También procesar atributos de volumetría
+    if (product.originalData?.volumetries && Array.isArray(product.originalData.volumetries) && product.originalData.volumetries.length > 0) {
+      const vol = product.originalData.volumetries[0]
+      const volumeAttrs = [
+        ['height', vol.height],
+        ['width', vol.width],
+        ['depth', vol.depth],
+        ['weight', vol.weight],
+        ['volumetric_weight', vol.volumetric_weight]
+      ]
+
+      for (const [name, value] of volumeAttrs) {
+        if (value) {
+          try {
+            await this.connection.execute(`
+              INSERT INTO product_attributes (product_id, attribute_name, attribute_value)
+              VALUES (?, ?, ?)
+            `, [product.id, name, String(value)])
+          } catch (error) {
+            // Ignorar errores de atributo volumétrico
+          }
         }
       }
     }

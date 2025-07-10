@@ -156,6 +156,94 @@ class ProductIndexer {
     const mainImage = product.pictures && product.pictures.length > 0 ? product.pictures[0] : null
     const volumetry = product.volumetries && product.volumetries.length > 0 ? product.volumetries[0] : {}
 
+    // ✅ Calcular fulfillment_type basado en features
+    let fulfillmentType = 'seller' // Por defecto
+    if (product.features?.super_express === true) {
+      fulfillmentType = 'fulfillment'
+    } else if (product.features?.fulfillment_id) {
+      fulfillmentType = 'fulfillment'
+    }
+
+    // ✅ Calcular relevance_score basado en múltiples factores (máximo 100.00)
+    let relevanceScore = 0
+
+    // Factor 1: Stock disponible (0-10 puntos)
+    const stock = product.stock || 0
+    if (stock > 0) {
+      relevanceScore += Math.min(stock * 0.3, 10) // Máximo 10 puntos
+    }
+
+    // Factor 2: Rating promedio (0-15 puntos)
+    const avgRating = product.rating?.average_score || 0
+    if (avgRating > 0) {
+      relevanceScore += (avgRating * 3) // Rating de 5 = 15 puntos
+    }
+
+    // Factor 3: Número de reviews (0-10 puntos)
+    const totalReviews = product.rating?.total_reviews || 0
+    if (totalReviews > 0) {
+      relevanceScore += Math.min(Math.log10(totalReviews + 1) * 3, 10) // Escala logarítmica
+    }
+
+    // Factor 4: Descuento (0-8 puntos)
+    const discount = product.pricing?.percentage_discount || 0
+    if (discount > 0) {
+      relevanceScore += Math.min(discount * 0.16, 8) // Máximo 8 puntos
+    }
+
+    // Factor 5: Super express (0-10 puntos)
+    if (product.features?.super_express === true) {
+      relevanceScore += 10
+    }
+
+    // Factor 6: Envío gratis (0-7 puntos)
+    if (product.shipping?.is_free === true) {
+      relevanceScore += 7
+    }
+
+    // Factor 7: Precio competitivo (0-5 puntos)
+    const price = product.pricing?.sales_price || 0
+    if (price > 0) {
+      if (price < 500) relevanceScore += 5         // Precio muy accesible
+      else if (price < 2000) relevanceScore += 4   // Precio accesible
+      else if (price < 10000) relevanceScore += 2  // Precio medio
+      else relevanceScore += 1                     // Precio alto
+    }
+
+    // Factor 8: Producto activo (0-5 puntos)
+    if (product.is_active === true) {
+      relevanceScore += 5
+    }
+
+    // Factor 9: Marca reconocida (0-5 puntos)
+    const recognizedBrands = ['NIKE', 'SAMSUNG', 'APPLE', 'SONY', 'LG', 'HP', 'DELL', 'CANON', 'ADIDAS', 'PUMA', 'MICROSOFT', 'HUAWEI']
+    if (product.brand && recognizedBrands.includes(product.brand.toUpperCase())) {
+      relevanceScore += 5
+    }
+
+    // Factor 10: ✅ RELEVANCIA API (0-20 puntos) - PESO INCREMENTADO
+    const apiRelevanceSales = product.relevance_sales || 0
+    const apiRelevanceAmount = product.relevance_amount || 0
+
+    // Dar más peso a la relevancia del API
+    let apiScore = 0
+
+    // relevance_sales puede ser de 0-100+
+    if (apiRelevanceSales > 0) {
+      apiScore += Math.min(apiRelevanceSales * 0.15, 12) // Hasta 12 puntos por sales
+    }
+
+    // relevance_amount puede ser de 0-100+
+    if (apiRelevanceAmount > 0) {
+      apiScore += Math.min(apiRelevanceAmount * 0.08, 8) // Hasta 8 puntos por amount
+    }
+
+    relevanceScore += apiScore
+
+    // ✅ LIMITAR a máximo 100.00 y redondear a 2 decimales
+    relevanceScore = Math.min(relevanceScore, 100.00)
+    relevanceScore = Math.round(relevanceScore * 100) / 100
+
     return {
       // IDs
       id: product.id || product.external_id,
@@ -178,7 +266,7 @@ class ProductIndexer {
       status: product.is_active ? 1 : 0,
       visible: 1, // Por defecto visible
 
-      // Categorías
+      // Categorías (ya en minúsculas)
       ...categories,
 
       // Tienda/Seller
@@ -188,7 +276,7 @@ class ProductIndexer {
       store_rating: product.seller?.store_rating || null,
       store_authorized: product.seller?.status ? 1 : 0,
 
-      // Características del producto
+      // ✅ Características del producto (mapeadas correctamente)
       digital: product.features?.digital ? 1 : 0,
       big_ticket: product.features?.is_big_ticket ? 1 : 0,
       back_order: product.features?.is_backorder ? 1 : 0,
@@ -205,13 +293,13 @@ class ProductIndexer {
       main_image: mainImage?.source || null,
       thumbnail: mainImage?.thumbnail || null,
 
-      // Fulfillment
-      fulfillment_type: product.features?.fulfillment_id ? 'fulfillment' : 'seller',
+      // ✅ Fulfillment corregido
+      fulfillment_type: fulfillmentType,
 
-      // Metadatos
-      relevance_score: product.relevance_sales || 0,
+      // ✅ Relevance score calculado
+      relevance_score: relevanceScore,
 
-      // Guardar datos originales para imágenes/variaciones
+      // Guardar datos originales para imágenes/variaciones/atributos
       originalData: product
     }
   }

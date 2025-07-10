@@ -10,7 +10,7 @@
     "build": "echo 'No build step needed'",
     "indexer:run": "node --env-file=.env scripts/run-indexer.js",
     "indexer:full": "node --env-file=.env scripts/run-indexer.js --update-facets --optimize-tables",
-    "indexer:quick": "node --env-file=.env scripts/run-indexer.js --pages 500",
+    "indexer:quick": "node --env-file=.env scripts/run-indexer.js --start-page 2477 --pages 5398",
     "indexer:stats": "node --env-file=.env scripts/run-indexer.js --stats-only",
     "indexer:dry-run": "node --env-file=.env scripts/run-indexer.js --pages 5 --dry-run",
     "indexer:maintenance": "node --env-file=.env scripts/run-indexer.js --cleanup-old --update-facets --optimize-tables --stats-only"
