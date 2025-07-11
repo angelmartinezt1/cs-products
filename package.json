@@ -37,7 +37,12 @@
     "typesense:debug-upsert": "node --env-file=.env scripts/typesense-upsert-debug.js",
     "typesense:fixed-quick": "node --env-file=.env scripts/typesense-indexer-fixed.js --pages 1",
     "typesense:id-fix": "node --env-file=.env scripts/typesense-indexer-id-fix.js",
-    "typesense:id-fix-test": "node --env-file=.env scripts/typesense-indexer-id-fix.js --pages 1"
+    "typesense:id-fix-test": "node --env-file=.env scripts/typesense-indexer-id-fix.js --pages 1",
+    "typesense:production": "node --env-file=.env scripts/typesense-indexer-production.js --batch-size 299",
+    "typesense:production-resume": "node --env-file=.env scripts/typesense-indexer-production.js --resume",
+    "typesense:production-test": "node --env-file=.env scripts/typesense-indexer-production.js --pages 5 --validate-upsert",
+    "typesense:production-dry": "node --env-file=.env scripts/typesense-indexer-production.js --pages 10 --dry-run",
+    "typesense:production-debug": "node --env-file=.env scripts/typesense-indexer-production.js --pages 20 --debug-errors --stop-on-errors"
   },
   "keywords": [],
   "author": "Juan Angel Martínez López",
