@@ -34,7 +34,10 @@
     "typesense:debug-page": "node --env-file=.env scripts/typesense-indexer-detailed-debug.js --single-page",
     "typesense:fixed": "node --env-file=.env scripts/typesense-indexer-fixed.js",
     "typesense:fixed-resume": "node --env-file=.env scripts/typesense-indexer-fixed.js --resume",
-    "typesense:fixed-quick": "node --env-file=.env scripts/typesense-indexer-fixed.js --pages 10"
+    "typesense:debug-upsert": "node --env-file=.env scripts/typesense-upsert-debug.js",
+    "typesense:fixed-quick": "node --env-file=.env scripts/typesense-indexer-fixed.js --pages 1",
+    "typesense:id-fix": "node --env-file=.env scripts/typesense-indexer-id-fix.js",
+    "typesense:id-fix-test": "node --env-file=.env scripts/typesense-indexer-id-fix.js --pages 1"
   },
   "keywords": [],
   "author": "Juan Angel Martínez López",
